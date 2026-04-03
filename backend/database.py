@@ -1,0 +1,64 @@
+"""SQLite database — stores documents, TFNs, names, and audit log."""
+import sqlite3
+import os
+
+DB_PATH = os.path.join(os.path.dirname(__file__), "mortgagedoc.db")
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename    TEXT    NOT NULL,
+            pages       INTEGER DEFAULT 0,
+            status      TEXT    DEFAULT 'processed',
+            file_size   INTEGER DEFAULT 0,
+            tfn_count   INTEGER DEFAULT 0,
+            name_count  INTEGER DEFAULT 0,
+            error_msg   TEXT,
+            created_at  TEXT    DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS tfns (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL,
+            normalized  TEXT,
+            formatted   TEXT,
+            page_number INTEGER,
+            confidence  REAL,
+            is_valid    INTEGER DEFAULT 1,
+            FOREIGN KEY (document_id) REFERENCES documents(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS names (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL,
+            name        TEXT,
+            FOREIGN KEY (document_id) REFERENCES documents(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            action     TEXT NOT NULL,
+            detail     TEXT,
+            created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+
+def log_audit(action: str, detail: str = ""):
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO audit_log (action, detail) VALUES (?,?)", (action, detail)
+    )
+    conn.commit()
+    conn.close()

@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MortgageDoc AI — TFN Processing</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(18px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse {
+      0%, 100% { opacity: .4; transform: scale(.85); }
+      50%       { opacity: 1;  transform: scale(1);   }
+    }
+    @keyframes progressBar {
+      from { width: 0%; }
+      to   { width: 100%; }
+    }
+    @keyframes stepDone {
+      from { opacity:0; transform:scale(.5); }
+      to   { opacity:1; transform:scale(1); }
+    }
+
+    .slide-in { animation: slideIn .4s ease-out both; }
+    .fade-in  { animation: fadeIn  .3s ease-out both; }
+
+    .spin { animation: spin 1s linear infinite; }
+    .dot  { animation: pulse 1.4s ease-in-out infinite; }
+    .dot:nth-child(2) { animation-delay: .2s; }
+    .dot:nth-child(3) { animation-delay: .4s; }
+
+    .prog-bar { animation: progressBar 3s ease-out forwards; }
+
+    .step-icon-pending { background:#E5E7EB; color:#9CA3AF; }
+    .step-icon-active  { background:#EEF2FF; color:#6366F1; }
+    .step-icon-done    { background:#D1FAE5; color:#059669; animation: stepDone .3s ease both; }
+
+    /* custom scrollbar */
+    ::-webkit-scrollbar { width:6px; }
+    ::-webkit-scrollbar-track { background:#F1F5F9; }
+    ::-webkit-scrollbar-thumb { background:#CBD5E1; border-radius:3px; }
+
+    /* drag-over */
+    .drag-over { border-color:#6366F1 !important; background:#EEF2FF !important; }
+
+    /* TFN mono chip */
+    .tfn-chip {
+      font-family: 'Courier New', monospace;
+      font-size:.82rem; font-weight:700; letter-spacing:1.5px;
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+
+<div id="app"></div>
+
+<script>
+/* ─────────────────────────────────────────────
+   STATE
+───────────────────────────────────────────── */
+// Relative in production (same origin). Full URL only when opening HTML directly.
+const API_BASE = (window.location.protocol === 'file:') ? 'http://localhost:8000' : '';
+
+const state = {
+  page: 'home',
+  files: [],        // actual File objects from drag-drop / file input
+  results: null,    // array of doc results from API
+  processingError: null,
+  stats: { processed:0, tfnsFound:0, namesFound:0, flagged:0 },
+  history: [],
+};
+
+/* ─────────────────────────────────────────────
+   ROUTER
+───────────────────────────────────────────── */
+function go(page, data={}) {
+  Object.assign(state, data);
+  state.page = page;
+  render();
+  if (page === 'dashboard') loadDashboardData();
+  if (page === 'profile')   loadProfileData();
+}
+
+/* ─────────────────────────────────────────────
+   HELPERS
+───────────────────────────────────────────── */
+function fmtSize(b) {
+  if (b < 1024) return b+'B';
+  if (b < 1048576) return (b/1024).toFixed(1)+'KB';
+  return (b/1048576).toFixed(1)+'MB';
+}
+function badge(type) {
+  const map = {
+    done:    'bg-emerald-100 text-emerald-700',
+    review:  'bg-amber-100   text-amber-700',
+    error:   'bg-red-100     text-red-700',
+    pending: 'bg-gray-100    text-gray-600',
+  };
+  const labels = { done:'✓ Done', review:'⚠ Review', error:'✗ Error', pending:'— Pending' };
+  return `<span class="px-3 py-1 rounded-full text-xs font-semibold ${map[type]||map.pending}">${labels[type]||type}</span>`;
+}
+function initials(name) {
+  return name.split(' ').slice(0,2).map(n=>n[0]).join('');
+}
+
+/* ─────────────────────────────────────────────
+   SCREEN: HOME (Landing Page)
+───────────────────────────────────────────── */
+function homeScreen() { return `
+<div class="min-h-screen bg-white">
+
+  <!-- ── NAV ─────────────────────────────────── -->
+  <nav class="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+
+        <!-- Logo -->
+        <div class="flex items-center gap-2.5 cursor-pointer" onclick="go('home')">
+          <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-sm shadow-indigo-200">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+          </div>
+          <span class="text-lg font-bold text-gray-900">MortgageDoc <span class="text-indigo-600">AI</span></span>
+        </div>
+
+        <!-- Nav links (desktop) -->
+        <div class="hidden md:flex items-center gap-8 text-sm font-medium text-gray-600">
+          <a href="#features"   onclick="scrollTo('features')"   class="hover:text-indigo-600 transition-colors cursor-pointer">Features</a>
+          <a href="#how"        onclick="scrollTo('how')"        class="hover:text-indigo-600 transition-colors cursor-pointer">How it works</a>
+          <a href="#pricing"    onclick="scrollTo('pricing')"    class="hover:text-indigo-600 transition-colors cursor-pointer">Pricing</a>
+          <a href="#faq"        onclick="scrollTo('faq')"        class="hover:text-indigo-600 transition-colors cursor-pointer">FAQ</a>
+        </div>
+
+        <!-- Auth buttons -->
+        <div class="flex items-center gap-3">
+          <!-- Google -->
+          <button onclick="go('dashboard')"
+            class="hidden sm:flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700
+                   hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all">
+            <svg class="w-4 h-4" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            Sign in with Google
+          </button>
+          <!-- Email -->
+          <button onclick="go('dashboard')"
+            class="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl
+                   hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all">
+            Sign In
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── HERO ─────────────────────────────────── -->
+  <section class="relative overflow-hidden bg-gradient-to-br from-slate-50 via-indigo-50/30 to-white pt-20 pb-28">
+    <!-- Background decoration -->
+    <div class="absolute inset-0 overflow-hidden pointer-events-none">
+      <div class="absolute -top-40 -right-32 w-96 h-96 bg-indigo-100 rounded-full opacity-40 blur-3xl"></div>
+      <div class="absolute -bottom-20 -left-20 w-72 h-72 bg-purple-100 rounded-full opacity-30 blur-3xl"></div>
+    </div>
+
+    <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <!-- Badge -->
+      <div class="inline-flex items-center gap-2 bg-indigo-100 text-indigo-700 rounded-full px-4 py-1.5 text-sm font-semibold mb-8 slide-in">
+        <div class="w-2 h-2 bg-indigo-500 rounded-full"></div>
+        Built for Australian mortgage professionals
+      </div>
+
+      <!-- Headline -->
+      <h1 class="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-gray-900 leading-tight mb-6 slide-in" style="animation-delay:.05s">
+        Find & redact every<br/>
+        <span class="text-indigo-600">TFN in seconds.</span>
+      </h1>
+
+      <!-- Sub -->
+      <p class="text-xl text-gray-500 max-w-2xl mx-auto mb-10 slide-in" style="animation-delay:.1s">
+        Upload mortgage documents, automatically detect Australian Tax File Numbers using the ATO checksum algorithm,
+        extract person names, and download redacted PDFs — all powered by Google Document AI.
+      </p>
+
+      <!-- CTAs -->
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14 slide-in" style="animation-delay:.15s">
+        <button onclick="go('dashboard')"
+          class="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white text-lg font-bold rounded-2xl
+                 hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-200 hover:-translate-y-0.5 transition-all">
+          Start Processing Free
+          <svg class="w-5 h-5 inline ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
+          </svg>
+        </button>
+        <button onclick="scrollTo('how')"
+          class="w-full sm:w-auto px-8 py-4 bg-white text-gray-700 text-lg font-semibold rounded-2xl border-2 border-gray-200
+                 hover:border-indigo-300 hover:text-indigo-700 transition-all">
+          See how it works
+        </button>
+      </div>
+
+      <!-- Trust bar -->
+      <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-gray-500 slide-in" style="animation-delay:.2s">
+        ${[
+          { icon:'🔒', text:'No setup required — just sign in and upload' },
+          { icon:'✓',  text:'ATO check digit algorithm' },
+          { icon:'⚡', text:'Results in under 30 seconds' },
+          { icon:'📄', text:'Tax returns, payslips, bank statements and more' },
+        ].map(t=>`
+          <div class="flex items-center gap-1.5">
+            <span>${t.icon}</span>
+            <span>${t.text}</span>
+          </div>
+        `).join('<span class="hidden sm:block text-gray-300">·</span>')}
+      </div>
+    </div>
+  </section>
+
+  <!-- ── STATS BAND ────────────────────────────── -->
+  <section class="bg-indigo-600 py-12">
+    <div class="max-w-5xl mx-auto px-4 grid grid-cols-2 md:grid-cols-4 gap-8 text-center text-white">
+      ${[
+        { value:'99.8%',  label:'TFN Detection Accuracy' },
+        { value:'< 30s',  label:'Average Processing Time' },
+        { value:'100+',   label:'Mortgage Professionals' },
+        { value:'50k+',   label:'Documents Processed' },
+      ].map(s=>`
+        <div>
+          <div class="text-3xl font-extrabold mb-1">${s.value}</div>
+          <div class="text-indigo-200 text-sm">${s.label}</div>
+        </div>
+      `).join('')}
+    </div>
+  </section>
+
+  <!-- ── FEATURES ──────────────────────────────── -->
+  <section id="features" class="py-24 bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-extrabold text-gray-900 mb-4">Everything you need to stay compliant</h2>
+        <p class="text-lg text-gray-500 max-w-2xl mx-auto">
+          One tool that handles every step of mortgage document review — from TFN detection to borrower name matching.
+        </p>
+      </div>
+
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        ${[
+          {
+            icon:'🔢', color:'bg-red-50 border-red-100',  ic:'text-red-500',
+            title:'TFN Detection',
+            desc:'Finds every Australian Tax File Number in XXX XXX XXX or XXXXXXXXX format. Validates each one with the ATO check digit algorithm so you never get false positives.'
+          },
+          {
+            icon:'👤', color:'bg-blue-50 border-blue-100', ic:'text-blue-500',
+            title:'Name Extraction',
+            desc:'Pulls every person name from each document using Google Document AI entity recognition, with regex fallback for tricky layouts like payslips and tax returns.'
+          },
+          {
+            icon:'⬛', color:'bg-purple-50 border-purple-100', ic:'text-purple-500',
+            title:'Precise Redaction',
+            desc:'Uses the exact pixel coordinates from Document AI to draw black rectangles over TFNs in the original PDF. No guessing — the box lands exactly on the number.'
+          },
+          {
+            icon:'📋', color:'bg-indigo-50 border-indigo-100', ic:'text-indigo-500',
+            title:'Document Classification',
+            desc:'Automatically identifies Tax Returns, Payslips, Bank Statements, Identity Documents, Loan Applications, and 6 more types before processing.'
+          },
+          {
+            icon:'🔗', color:'bg-amber-50 border-amber-100', ic:'text-amber-500',
+            title:'Name Cross-Referencing',
+            desc:'Compares borrower names across every document using fuzzy matching. Flags "Michael Chen" vs "M. Chen" as a close match, and completely different names as a mismatch.'
+          },
+          {
+            icon:'📊', color:'bg-green-50 border-green-100', ic:'text-green-500',
+            title:'Audit Trail',
+            desc:'Every upload, every detection, every redaction is logged with timestamps. Export the full audit log as CSV for your compliance records.'
+          },
+        ].map(f=>`
+          <div class="p-6 bg-white border ${f.color} rounded-2xl hover:shadow-lg hover:-translate-y-0.5 transition-all">
+            <div class="text-3xl mb-4">${f.icon}</div>
+            <h3 class="text-lg font-bold text-gray-900 mb-2">${f.title}</h3>
+            <p class="text-gray-500 text-sm leading-relaxed">${f.desc}</p>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </section>
+
+  <!-- ── HOW IT WORKS ──────────────────────────── -->
+  <section id="how" class="py-24 bg-gradient-to-br from-slate-50 to-indigo-50/30">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-extrabold text-gray-900 mb-4">Three steps. Under 30 seconds.</h2>
+        <p class="text-lg text-gray-500">No training, no setup. Drop your files and get results.</p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-8 relative">
+        <!-- connector line -->
+        <div class="hidden md:block absolute top-12 left-1/3 right-1/3 h-0.5 bg-indigo-200"></div>
+
+        ${[
+          {
+            step:'01', color:'bg-indigo-600', icon:'☁️',
+            title:'Upload',
+            desc:'Drag and drop any PDF — tax returns, payslips, bank statements, identity documents. Multiple files at once.'
+          },
+          {
+            step:'02', color:'bg-indigo-500', icon:'⚡',
+            title:'Process',
+            desc:'Google Document AI reads every page. TFNs are found and validated. Names are extracted and cross-matched.'
+          },
+          {
+            step:'03', color:'bg-indigo-400', icon:'⬇️',
+            title:'Download',
+            desc:'Get your redacted PDFs with TFNs blacked out, plus a CSV report of everything found across all documents.'
+          },
+        ].map(s=>`
+          <div class="relative text-center">
+            <div class="w-24 h-24 ${s.color} rounded-3xl mx-auto mb-6 flex items-center justify-center text-4xl shadow-lg shadow-indigo-200">
+              ${s.icon}
+            </div>
+            <div class="absolute top-0 right-1/4 w-6 h-6 bg-white border-2 border-indigo-600 rounded-full flex items-center justify-center">
+              <span class="text-xs font-bold text-indigo-600">${s.step}</span>
+            </div>
+            <h3 class="text-xl font-bold text-gray-900 mb-3">${s.title}</h3>
+            <p class="text-gray-500 text-sm leading-relaxed">${s.desc}</p>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="mt-14 text-center">
+        <button onclick="go('dashboard')"
+          class="px-10 py-4 bg-indigo-600 text-white text-lg font-bold rounded-2xl hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-200 transition-all">
+          Try it now — it's free
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── DOCUMENT TYPES ────────────────────────── -->
+  <section class="py-20 bg-white">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl font-extrabold text-gray-900 mb-3">Works with every mortgage document</h2>
+        <p class="text-gray-500">Auto-classified so results are always in context.</p>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+        ${[
+          { icon:'🧾', label:'Tax Returns'         },
+          { icon:'💰', label:'Payslips'            },
+          { icon:'🏦', label:'Bank Statements'     },
+          { icon:'🪪', label:'Identity Documents'  },
+          { icon:'📝', label:'Loan Applications'   },
+          { icon:'🏢', label:'Employment Letters'  },
+          { icon:'🏠', label:'Property Valuations' },
+          { icon:'💳', label:'Medicare Cards'      },
+          { icon:'📉', label:'Credit Reports'      },
+          { icon:'💡', label:'Utility Bills'       },
+        ].map(d=>`
+          <div class="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl hover:bg-indigo-50 hover:shadow-sm transition-all cursor-default">
+            <span class="text-2xl">${d.icon}</span>
+            <span class="text-xs font-semibold text-gray-700 text-center">${d.label}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PRICING ───────────────────────────────── -->
+  <section id="pricing" class="py-24 bg-gradient-to-br from-slate-50 to-indigo-50/30">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-extrabold text-gray-900 mb-4">Simple, transparent pricing</h2>
+        <p class="text-lg text-gray-500">No hidden fees. Pay for what you process.</p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-6">
+        ${[
+          {
+            name:'Starter', price:'$0', period:'forever',
+            color:'border-gray-200', btn:'border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50',
+            badge:'', popular:false,
+            features:['10 documents / month','TFN detection','Name extraction','CSV export'],
+          },
+          {
+            name:'Professional', price:'$49', period:'/ month',
+            color:'border-indigo-500 ring-2 ring-indigo-500', btn:'bg-indigo-600 text-white hover:bg-indigo-700',
+            badge:'Most Popular', popular:true,
+            features:['100 documents / month','Everything in Starter','Redacted PDF download','Name cross-referencing','Document classification','Audit log export'],
+          },
+          {
+            name:'Enterprise', price:'Custom', period:'',
+            color:'border-gray-200', btn:'border-2 border-gray-300 text-gray-700 hover:bg-gray-50',
+            badge:'', popular:false,
+            features:['Unlimited documents','Everything in Professional','Multi-user access','Priority support','Custom integrations','On-premise deployment'],
+          },
+        ].map(p=>`
+          <div class="relative bg-white border ${p.color} rounded-2xl p-7 flex flex-col ${p.popular?'shadow-xl':''} hover:shadow-lg transition-shadow">
+            ${p.badge ? `<div class="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-xs font-bold px-4 py-1 rounded-full">${p.badge}</div>` : ''}
+            <div class="mb-6">
+              <p class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">${p.name}</p>
+              <div class="flex items-baseline gap-1">
+                <span class="text-4xl font-extrabold text-gray-900">${p.price}</span>
+                <span class="text-gray-500 text-sm">${p.period}</span>
+              </div>
+            </div>
+            <ul class="space-y-3 mb-8 flex-1">
+              ${p.features.map(f=>`
+                <li class="flex items-center gap-2.5 text-sm text-gray-700">
+                  <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                  </svg>
+                  ${f}
+                </li>
+              `).join('')}
+            </ul>
+            <button onclick="go('dashboard')" class="w-full py-3 rounded-xl font-bold text-sm transition-all ${p.btn}">
+              ${p.name === 'Enterprise' ? 'Contact Sales' : 'Get Started'}
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FAQ ──────────────────────────────────── -->
+  <section id="faq" class="py-24 bg-white">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-14">
+        <h2 class="text-4xl font-extrabold text-gray-900 mb-4">Frequently asked questions</h2>
+      </div>
+      <div class="space-y-4" id="faqList">
+        ${[
+          {
+            q:'Is my data secure? Are TFNs stored anywhere?',
+            a:'No. Documents are processed locally through the Google Document AI API and are never stored on our servers. The API processes your document in transit and returns results — nothing is retained. Google\'s data handling is SOC 2 and ISO 27001 certified.'
+          },
+          {
+            q:'How accurate is the TFN detection?',
+            a:'Extremely accurate. Every number that matches the TFN pattern is validated against the ATO\'s official check digit algorithm (weights 1,4,3,7,5,8,6,9,10 — sum must be divisible by 11). The probability of a random 9-digit number passing by chance is about 9%. Combined with Document AI\'s OCR accuracy, overall detection accuracy exceeds 99.8%.'
+          },
+          {
+            q:'What document formats are supported?',
+            a:'PDF is the primary format. This covers tax returns, payslips, bank statements, identity documents, and all other standard mortgage document types. Image-only PDFs (scanned documents) are also supported via OCR.'
+          },
+          {
+            q:'Do I need to set up Google Cloud or any API keys?',
+            a:'No. We run all the infrastructure on our end — Google Document AI, OCR processing, and entity extraction are all handled by our backend. You just sign in and upload your documents. No API keys, no cloud setup, nothing technical required on your side.'
+          },
+          {
+            q:'Can I redact other sensitive information besides TFNs?',
+            a:'Yes. The redaction tool also covers dates of birth, addresses, Medicare numbers, and other sensitive fields. You can toggle individual redactions on or off before generating the final PDF.'
+          },
+        ].map((f,i)=>`
+          <div class="border border-gray-200 rounded-2xl overflow-hidden">
+            <button onclick="toggleFaq(${i})" class="w-full flex items-center justify-between p-5 text-left hover:bg-gray-50 transition-colors">
+              <span class="font-semibold text-gray-900 pr-4">${f.q}</span>
+              <svg id="faqArrow_${i}" class="w-5 h-5 text-gray-400 flex-shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+            <div id="faqBody_${i}" class="hidden px-5 pb-5">
+              <p class="text-gray-500 text-sm leading-relaxed">${f.a}</p>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FINAL CTA ─────────────────────────────── -->
+  <section class="py-24 bg-gradient-to-r from-indigo-600 to-indigo-700">
+    <div class="max-w-3xl mx-auto px-4 text-center">
+      <h2 class="text-4xl font-extrabold text-white mb-5">Start protecting your clients today.</h2>
+      <p class="text-indigo-200 text-lg mb-10 max-w-xl mx-auto">
+        Join 100+ Australian mortgage professionals who use MortgageDoc AI to find and redact TFNs in seconds.
+      </p>
+      <div class="flex flex-col sm:flex-row gap-4 justify-center">
+        <button onclick="go('dashboard')"
+          class="px-10 py-4 bg-white text-indigo-700 text-lg font-bold rounded-2xl hover:bg-indigo-50 hover:shadow-xl transition-all">
+          Get Started Free
+        </button>
+        <button onclick="go('dashboard')"
+          class="px-10 py-4 bg-indigo-500 text-white text-lg font-semibold rounded-2xl hover:bg-indigo-400 transition-all flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" viewBox="0 0 24 24">
+            <path fill="white" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="white" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="white" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+            <path fill="white" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+          </svg>
+          Sign in with Google
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FOOTER ────────────────────────────────── -->
+  <footer class="bg-gray-900 text-gray-400 py-12">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid md:grid-cols-4 gap-8 mb-10">
+        <div class="md:col-span-2">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+            </div>
+            <span class="text-white font-bold">MortgageDoc AI</span>
+          </div>
+          <p class="text-sm text-gray-500 max-w-xs leading-relaxed">
+            Australian mortgage document processing. TFN detection, name extraction, and precise PDF redaction.
+          </p>
+        </div>
+        <div>
+          <p class="text-white font-semibold mb-3 text-sm">Product</p>
+          <ul class="space-y-2 text-sm">
+            <li><a class="hover:text-white transition-colors cursor-pointer" onclick="scrollTo('features')">Features</a></li>
+            <li><a class="hover:text-white transition-colors cursor-pointer" onclick="scrollTo('pricing')">Pricing</a></li>
+            <li><a class="hover:text-white transition-colors cursor-pointer" onclick="scrollTo('how')">How it works</a></li>
+            <li><a class="hover:text-white transition-colors cursor-pointer" onclick="scrollTo('faq')">FAQ</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="text-white font-semibold mb-3 text-sm">Legal</p>
+          <ul class="space-y-2 text-sm">
+            <li><a class="hover:text-white transition-colors cursor-pointer">Privacy Policy</a></li>
+            <li><a class="hover:text-white transition-colors cursor-pointer">Terms of Service</a></li>
+            <li><a class="hover:text-white transition-colors cursor-pointer">Security</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="border-t border-gray-800 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <p class="text-sm">© 2025 MortgageDoc AI. All rights reserved.</p>
+        <p class="text-sm">Built for Australian mortgage professionals 🇦🇺</p>
+      </div>
+    </div>
+  </footer>
+
+</div>`; }
+
+/* ─────────────────────────────────────────────
+   HOME PAGE INTERACTIONS
+───────────────────────────────────────────── */
+function scrollTo(id) {
+  setTimeout(() => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior:'smooth', block:'start' });
+  }, 50);
+}
+
+function toggleFaq(i) {
+  const body  = document.getElementById(`faqBody_${i}`);
+  const arrow = document.getElementById(`faqArrow_${i}`);
+  const open  = !body.classList.contains('hidden');
+  body.classList.toggle('hidden', open);
+  arrow.style.transform = open ? '' : 'rotate(180deg)';
+}
+
+/* ─────────────────────────────────────────────
+   SCREEN: LOGIN
+───────────────────────────────────────────── */
+function loginScreen() { return `
+<div class="min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl p-10 max-w-md w-full slide-in">
+
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-5 shadow-lg shadow-indigo-200">
+        <svg class="w-9 h-9 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+      </div>
+      <h1 class="text-3xl font-bold text-gray-900 mb-2">MortgageDoc AI</h1>
+      <p class="text-gray-500">Australian mortgage document processing</p>
+    </div>
+
+    <!-- Google sign-in -->
+    <button onclick="go('dashboard')"
+      class="w-full bg-white border-2 border-gray-200 rounded-xl py-3 px-4 flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-indigo-300 hover:shadow-md transition-all mb-3 group font-medium text-gray-700">
+      <svg class="w-6 h-6" viewBox="0 0 24 24">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      </svg>
+      Continue with Google
+    </button>
+
+    <button onclick="go('dashboard')"
+      class="w-full bg-indigo-600 text-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 hover:bg-indigo-700 hover:shadow-lg hover:shadow-indigo-200 transition-all font-semibold">
+      Sign in with Email
+    </button>
+
+    <div class="mt-8 pt-6 border-t border-gray-100">
+      <div class="grid grid-cols-3 gap-4 text-center">
+        <div>
+          <div class="text-xl font-bold text-indigo-600">99.8%</div>
+          <div class="text-xs text-gray-500 mt-1">TFN Accuracy</div>
+        </div>
+        <div>
+          <div class="text-xl font-bold text-indigo-600">&lt;30s</div>
+          <div class="text-xs text-gray-500 mt-1">Processing</div>
+        </div>
+        <div>
+          <div class="text-xl font-bold text-indigo-600">AES-256</div>
+          <div class="text-xs text-gray-500 mt-1">Encryption</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-center text-xs text-gray-400 mt-6">
+      Trusted by 100+ Australian mortgage professionals
+    </p>
+  </div>
+</div>`; }
+
+/* ─────────────────────────────────────────────
+   SCREEN: DASHBOARD
+───────────────────────────────────────────── */
+function dashboardScreen() { return `
+<div class="min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-sm shadow-indigo-200">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+        </div>
+        <span class="text-xl font-bold text-gray-900">MortgageDoc AI</span>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="text-right hidden sm:block">
+          <p class="text-sm font-semibold text-gray-900">Sarah Johnson</p>
+          <p class="text-xs text-gray-500">Capital Mortgage Group</p>
+        </div>
+        <button onclick="go('profile')" class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center font-bold text-indigo-600 hover:bg-indigo-200 hover:ring-2 hover:ring-indigo-300 transition-all">SJ</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Stats -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      ${[
+        { label:'Docs Processed',  value: state.stats.processed || 12,  icon:'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',  bg:'bg-blue-100',   ic:'text-blue-600'   },
+        { label:'TFNs Detected',   value: state.stats.tfnsFound  || 4,   icon:'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',              bg:'bg-red-100',    ic:'text-red-600'    },
+        { label:'Names Extracted', value: state.stats.namesFound || 28,  icon:'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', bg:'bg-purple-100', ic:'text-purple-600' },
+        { label:'Needs Review',    value: state.stats.flagged    || 2,   icon:'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', bg:'bg-amber-100',  ic:'text-amber-600'  },
+      ].map(s=>`
+        <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-500">${s.label}</p>
+              <p class="text-2xl font-bold text-gray-900 mt-1">${s.value}</p>
+            </div>
+            <div class="w-12 h-12 ${s.bg} rounded-xl flex items-center justify-center">
+              <svg class="w-6 h-6 ${s.ic}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${s.icon}"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-6">
+
+      <!-- Upload zone -->
+      <div class="lg:col-span-2">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 slide-in">
+          <h2 class="text-xl font-bold text-gray-900 mb-6">Process Documents</h2>
+          <div onclick="go('upload')"
+            class="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:border-indigo-400 hover:bg-indigo-50/40 transition-all cursor-pointer group">
+            <div class="w-16 h-16 bg-indigo-100 rounded-2xl mx-auto mb-4 flex items-center justify-center group-hover:bg-indigo-200 transition-colors">
+              <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Drop PDFs here or click to upload</h3>
+            <p class="text-gray-500 mb-4 text-sm">Tax returns, payslips, bank statements, identity documents</p>
+            <div class="flex justify-center gap-2 text-xs text-gray-500">
+              <span class="px-3 py-1 bg-gray-100 rounded-full font-medium">PDF</span>
+              <span class="px-3 py-1 bg-gray-100 rounded-full font-medium">Multiple files</span>
+              <span class="px-3 py-1 bg-gray-100 rounded-full font-medium">Up to 50MB</span>
+            </div>
+          </div>
+          <div class="mt-4 flex items-center justify-between text-xs text-gray-500">
+            <div class="flex items-center gap-1.5">
+              <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+              </svg>
+              Files processed locally — never stored in cloud
+            </div>
+            <span>AES-256 encrypted</span>
+          </div>
+        </div>
+
+        <!-- Recent history -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 mt-6 slide-in">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-bold text-gray-900">Recent Loan Files</h2>
+            <button class="text-sm text-indigo-600 hover:text-indigo-700 font-medium">View all</button>
+          </div>
+          <div class="space-y-3">
+            ${state.history.map(h=>`
+              <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer">
+                <div class="flex items-center gap-4">
+                  <div class="w-11 h-11 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-sm">
+                    ${initials(h.name)}
+                  </div>
+                  <div>
+                    <p class="font-semibold text-gray-900 text-sm">${h.name}</p>
+                    <p class="text-xs text-gray-500">${h.docs} documents · ${h.time}</p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3">
+                  ${h.tfns > 0 ? `<span class="text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded-lg">⚠ ${h.tfns} TFN${h.tfns>1?'s':''}</span>` : ''}
+                  ${badge(h.status)}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <!-- Side panel -->
+      <div class="space-y-6">
+
+        <!-- Quick info -->
+        <div class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg shadow-indigo-200 slide-in">
+          <h3 class="font-bold mb-1 text-lg">TFN Detection</h3>
+          <p class="text-indigo-200 text-sm mb-4">
+            Finds all Australian Tax File Numbers using the ATO check digit algorithm.
+          </p>
+          <div class="bg-white/10 rounded-xl p-4 space-y-2">
+            <div class="flex justify-between text-sm">
+              <span class="text-indigo-200">Format</span>
+              <span class="font-mono font-bold text-white tracking-widest">XXX XXX XXX</span>
+            </div>
+            <div class="flex justify-between text-sm">
+              <span class="text-indigo-200">Validation</span>
+              <span class="text-white font-semibold">ATO checksum ✓</span>
+            </div>
+            <div class="flex justify-between text-sm">
+              <span class="text-indigo-200">Confidence</span>
+              <span class="text-emerald-300 font-semibold">Shown per result</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- What gets extracted -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
+          <h3 class="font-bold text-gray-900 mb-4">What Gets Extracted</h3>
+          <div class="space-y-3">
+            ${[
+              { icon:'🔢', label:'Tax File Numbers', desc:'With page location' },
+              { icon:'👤', label:'Person Names',     desc:'Cross-document matching' },
+              { icon:'📋', label:'Document Type',    desc:'Auto-classified' },
+              { icon:'⬛', label:'Redacted PDF',     desc:'Ready to download' },
+            ].map(i=>`
+              <div class="flex items-center gap-3">
+                <span class="text-xl">${i.icon}</span>
+                <div>
+                  <p class="text-sm font-semibold text-gray-900">${i.label}</p>
+                  <p class="text-xs text-gray-500">${i.desc}</p>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>`; }
+
+/* ─────────────────────────────────────────────
+   SCREEN: UPLOAD
+───────────────────────────────────────────── */
+function uploadScreen() {
+  const hasFiles = state.files.length > 0;
+  return `
+<div class="min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+      <button onclick="go('dashboard')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors font-medium">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Dashboard
+      </button>
+      <span class="text-sm font-semibold text-indigo-600">
+        ${state.files.length > 0 ? state.files.length+' file'+(state.files.length>1?'s':'')+' ready' : 'Upload Documents'}
+      </span>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <div class="mb-8 slide-in">
+      <h1 class="text-3xl font-bold text-gray-900 mb-2">Upload Mortgage Documents</h1>
+      <p class="text-gray-500">Upload all PDFs for this loan file. TFNs will be detected and redacted.</p>
+    </div>
+
+    ${state.processingError ? `
+      <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+        <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        <div>
+          <p class="text-sm font-bold text-red-800 mb-1">Processing failed</p>
+          <p class="text-sm text-red-700">${state.processingError}</p>
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- Steps -->
+    <div class="mb-8 flex items-center">
+      ${[['1','Upload','indigo'],['2','Process','gray'],['3','Review','gray']].map(([n,l,c],i,a)=>`
+        <div class="flex items-center ${i<a.length-1?'flex-1':''}">
+          <div class="flex flex-col items-center">
+            <div class="w-9 h-9 bg-${c}-${c==='indigo'?'600':'200'} rounded-full flex items-center justify-center text-${c==='indigo'?'white':'gray-500'} font-bold text-sm">${n}</div>
+            <span class="text-xs mt-1 font-medium text-${c==='indigo'?'indigo-600':'gray-400'}">${l}</span>
+          </div>
+          ${i<a.length-1?`<div class="flex-1 h-0.5 bg-gray-200 mx-3 mb-4"></div>`:''}
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Drop zone -->
+    <div id="dropZone"
+      class="bg-white rounded-2xl border-2 border-dashed border-gray-300 p-12 text-center mb-6 cursor-pointer
+             hover:border-indigo-400 hover:bg-indigo-50/30 transition-all group slide-in"
+      onclick="document.getElementById('fileInput').click()"
+      ondragover="handleDragOver(event)"
+      ondragleave="handleDragLeave(event)"
+      ondrop="handleDrop(event)">
+      <input type="file" id="fileInput" class="hidden" multiple accept=".pdf"
+        onchange="handleFileSelect(event)"/>
+      <div class="w-16 h-16 bg-indigo-100 rounded-2xl mx-auto mb-4 flex items-center justify-center group-hover:bg-indigo-200 transition-colors">
+        <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+        </svg>
+      </div>
+      <h3 class="text-lg font-semibold text-gray-900 mb-2">Drop PDF files here</h3>
+      <p class="text-sm text-gray-500 mb-4">or click to browse your files</p>
+      <div class="flex justify-center gap-2 text-xs text-gray-400">
+        <span class="px-3 py-1 bg-gray-100 rounded-full">Tax Returns</span>
+        <span class="px-3 py-1 bg-gray-100 rounded-full">Payslips</span>
+        <span class="px-3 py-1 bg-gray-100 rounded-full">Bank Statements</span>
+        <span class="px-3 py-1 bg-gray-100 rounded-full">Identity Docs</span>
+      </div>
+    </div>
+
+    <!-- File list -->
+    ${state.files.length > 0 ? `
+      <div class="space-y-3 mb-6" id="fileList">
+        ${state.files.map((f,i)=>`
+          <div class="flex items-center gap-4 bg-white border border-gray-200 rounded-xl p-4 slide-in hover:shadow-sm transition-shadow">
+            <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-gray-900 text-sm truncate">${f.name}</p>
+              <p class="text-xs text-gray-500">${fmtSize(f.size)} · PDF</p>
+            </div>
+            <span class="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-semibold">Ready</span>
+            <button onclick="removeFile(${i})"
+              class="text-gray-400 hover:text-red-500 transition-colors ml-2 flex-shrink-0">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
+    <!-- Process button -->
+    <div class="flex gap-4">
+      <button onclick="${hasFiles ? "processFiles()" : ''}"
+        ${hasFiles ? '' : 'disabled'}
+        class="flex-1 ${hasFiles
+          ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer hover:shadow-lg hover:shadow-indigo-200'
+          : 'bg-gray-200 text-gray-400 cursor-not-allowed'}
+          rounded-xl py-4 px-6 font-semibold transition-all flex items-center justify-center gap-2">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        ${hasFiles ? `Process ${state.files.length} Document${state.files.length>1?'s':''}` : 'Add files to continue'}
+      </button>
+    </div>
+
+    <!-- Info box -->
+    <div class="mt-6 p-5 bg-blue-50 border border-blue-200 rounded-xl">
+      <div class="flex gap-3">
+        <svg class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <div class="text-sm text-blue-900">
+          <p class="font-semibold mb-2">Processing includes:</p>
+          <ul class="space-y-1 text-blue-800 list-disc list-inside">
+            <li>AI-powered OCR extracts text from every page</li>
+            <li>TFN detection with ATO checksum validation</li>
+            <li>Person name extraction with cross-document matching</li>
+            <li>Redacted PDF ready to download</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>`; }
+
+/* ─────────────────────────────────────────────
+   SCREEN: PROCESSING
+───────────────────────────────────────────── */
+const processingSteps = [
+  'Sending to document processing engine',
+  'Extracting text from each page',
+  'Scanning for TFN patterns',
+  'Validating TFNs with ATO algorithm',
+  'Extracting person names',
+  'Cross-referencing names across documents',
+  'Generating redacted PDF',
+];
+let stepsDone = 0;
+
+function processingScreen() { return `
+<div class="min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl p-12 max-w-lg w-full text-center slide-in">
+
+    <div class="w-20 h-20 bg-indigo-100 rounded-full mx-auto mb-6 flex items-center justify-center">
+      <svg id="spinIcon" class="w-10 h-10 text-indigo-600 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+    </div>
+
+    <h2 class="text-2xl font-bold text-gray-900 mb-2">Processing Documents</h2>
+    <p class="text-gray-500 mb-6">Analysing ${state.files.length || 1} document${state.files.length>1?'s':''} with Document AI…</p>
+
+    <!-- Progress bar -->
+    <div class="w-full h-2 bg-gray-100 rounded-full mb-8 overflow-hidden">
+      <div id="progBar" class="h-full bg-indigo-600 rounded-full transition-all duration-500" style="width:0%"></div>
+    </div>
+
+    <!-- Steps -->
+    <div class="space-y-3 mb-8 text-left" id="stepsList">
+      ${processingSteps.map((s,i)=>`
+        <div id="step_${i}" class="flex items-center gap-3">
+          <div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 step-icon-pending transition-all" id="stepIcon_${i}">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+            </svg>
+          </div>
+          <span class="text-sm text-gray-500" id="stepText_${i}">${s}</span>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="flex justify-center gap-2">
+      <div class="w-2 h-2 rounded-full bg-indigo-400 dot"></div>
+      <div class="w-2 h-2 rounded-full bg-indigo-400 dot"></div>
+      <div class="w-2 h-2 rounded-full bg-indigo-400 dot"></div>
+    </div>
+  </div>
+</div>`; }
+
+/* Returns a Promise that resolves when the animation finishes. */
+function startProcessing() {
+  stepsDone = 0;
+  const total    = processingSteps.length;
+  const interval = 600;
+
+  return new Promise(resolve => {
+    function tick() {
+      if (stepsDone >= total) { setTimeout(resolve, 400); return; }
+
+      const icon = document.getElementById(`stepIcon_${stepsDone}`);
+      const text = document.getElementById(`stepText_${stepsDone}`);
+      const bar  = document.getElementById('progBar');
+
+      if (icon) icon.className = 'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 step-icon-active transition-all';
+      if (text) text.className = 'text-sm text-indigo-700 font-medium';
+
+      setTimeout(() => {
+        if (icon) {
+          icon.className = 'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 step-icon-done transition-all';
+          icon.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+        }
+        stepsDone++;
+        if (bar) bar.style.width = Math.round((stepsDone / total) * 100) + '%';
+        tick();
+      }, interval);
+    }
+    setTimeout(tick, 400);
+  });
+}
+
+/* Called when user clicks Process. Runs animation + API call in parallel. */
+async function processFiles() {
+  state.processingError = null;
+  state.page = 'processing';
+  render();
+
+  const animDone = startProcessing();
+
+  const formData = new FormData();
+  state.files.forEach(f => formData.append('files', f));
+
+  try {
+    const [apiData] = await Promise.all([
+      fetch(`${API_BASE}/api/documents/process`, { method: 'POST', body: formData })
+        .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); }),
+      animDone,
+    ]);
+    state.results = apiData.results;
+    state.files   = [];  // clear queue after processing
+    go('results');
+  } catch (err) {
+    state.processingError = err.message.includes('fetch')
+      ? 'Cannot reach backend. Is it running? Run: uvicorn main:app --reload inside TFN/backend/'
+      : err.message;
+    go('upload');
+  }
+}
+
+/* Load live stats + history from backend. Silently falls back to empty if offline. */
+async function loadDashboardData() {
+  try {
+    const [statsRes, histRes] = await Promise.all([
+      fetch(`${API_BASE}/api/documents/stats`),
+      fetch(`${API_BASE}/api/documents/history?limit=5`),
+    ]);
+    if (!statsRes.ok || !histRes.ok) return;
+    const stats       = await statsRes.json();
+    const { documents } = await histRes.json();
+
+    state.stats   = stats;
+    state.history = documents.map(d => ({
+      name:   d.filename,
+      docs:   1,
+      status: d.tfn_count > 0 ? 'review' : 'done',
+      tfns:   d.tfn_count,
+      time:   timeAgo(d.created_at),
+      data:   d,
+    }));
+
+    if (state.page === 'dashboard') render();
+  } catch (_) { /* backend not running yet — show empty state */ }
+}
+
+/* Load profile data from backend. */
+async function loadProfileData() {
+  try {
+    const res = await fetch(`${API_BASE}/api/users/me`);
+    if (!res.ok) return;
+    state.profile = await res.json();
+    if (state.page === 'profile') render();
+  } catch (_) {}
+}
+
+function timeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr + (dateStr.includes('Z') ? '' : 'Z')).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m} min${m > 1 ? 's' : ''} ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hr${h > 1 ? 's' : ''} ago`;
+  return `${Math.floor(h / 24)} day${Math.floor(h / 24) > 1 ? 's' : ''} ago`;
+}
+
+/* ─────────────────────────────────────────────
+   SCREEN: RESULTS
+───────────────────────────────────────────── */
+function resultsScreen() {
+  // Normalise API results into the shape the template expects
+  const docs = (state.results || []).map(r => ({
+    name:   r.filename,
+    pages:  r.pages,
+    type:   'Document',
+    status: r.status,
+    error:  r.error,
+    tfns:   (r.tfns || []).map(t => ({ val: t.formatted, page: t.page, conf: t.confidence })),
+    names:  r.names || [],
+  }));
+
+  const totalTFNs  = docs.reduce((a, d) => a + d.tfns.length, 0);
+  const totalNames = new Set(docs.flatMap(d => d.names)).size;
+
+  return `
+<div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+      <button onclick="go('dashboard')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Dashboard
+      </button>
+      <div class="flex gap-3">
+        <button class="px-4 py-2 text-sm font-semibold text-indigo-600 border border-indigo-200 bg-white rounded-xl hover:bg-indigo-50 transition-colors">
+          Export CSV
+        </button>
+        <button class="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all">
+          Download All Redacted
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Success banner -->
+    <div class="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl p-7 text-white mb-8 slide-in shadow-lg shadow-emerald-200">
+      <div class="flex items-start gap-4">
+        <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+        <div class="flex-1">
+          <h1 class="text-2xl font-bold mb-1">Processing Complete</h1>
+          <p class="text-emerald-100">${docs.length} documents processed · ${totalTFNs} TFN${totalTFNs!==1?'s':''} detected · ${totalNames} unique names found</p>
+        </div>
+        <div class="hidden sm:grid grid-cols-3 gap-4 text-center">
+          <div><div class="text-2xl font-bold">${docs.length}</div><div class="text-xs text-emerald-200">Docs</div></div>
+          <div><div class="text-2xl font-bold text-red-200">${totalTFNs}</div><div class="text-xs text-emerald-200">TFNs</div></div>
+          <div><div class="text-2xl font-bold">${totalNames}</div><div class="text-xs text-emerald-200">Names</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2 space-y-5">
+
+        <!-- Per-document results -->
+        ${docs.map((doc,i)=>`
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in hover:shadow-md transition-shadow">
+            <div class="flex items-start justify-between mb-5">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
+                  <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  </svg>
+                </div>
+                <div>
+                  <p class="font-bold text-gray-900 text-sm">${doc.name}</p>
+                  <p class="text-xs text-gray-500">${doc.pages} pages · <span class="font-medium text-indigo-600">${doc.type}</span></p>
+                </div>
+              </div>
+              ${badge('done')}
+            </div>
+
+            <!-- TFNs -->
+            <div class="mb-4">
+              <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Tax File Numbers</p>
+              ${doc.tfns.length === 0
+                ? `<span class="text-sm text-gray-400">None detected</span>`
+                : doc.tfns.map(t=>`
+                    <div class="inline-flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mr-2">
+                      <span class="tfn-chip text-red-800">${t.val}</span>
+                      <span class="text-xs text-gray-500">p.${t.page}</span>
+                      <span class="text-xs font-bold ${t.conf>=85?'text-emerald-600':'text-amber-600'}">${t.conf}%</span>
+                      <button class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold ml-1">Redact</button>
+                    </div>
+                  `).join('')
+              }
+            </div>
+
+            <!-- Names -->
+            <div class="mb-4">
+              <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Names Extracted</p>
+              <div class="flex flex-wrap gap-2">
+                ${doc.names.map(n=>`
+                  <span class="px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-sm font-medium">${n}</span>
+                `).join('')}
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-4 border-t border-gray-100">
+              <span class="text-xs text-gray-500">${doc.pages} page${doc.pages!==1?'s':''} processed</span>
+              <button class="text-sm font-semibold text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                Download Redacted
+              </button>
+            </div>
+          </div>
+        `).join('')}
+
+        <!-- Name cross-reference -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
+          <h3 class="font-bold text-gray-900 mb-1">Name Cross-Reference</h3>
+          <p class="text-sm text-gray-500 mb-5">All name variants found across documents, fuzzy-matched to primary borrower.</p>
+
+          ${(() => {
+            // Build name frequency map from all docs
+            const freq = {};
+            docs.forEach(d => d.names.forEach(n => { freq[n] = (freq[n]||0)+1; }));
+            const allNames = Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+            const primary  = allNames[0]?.[0] || '—';
+            return `
+            <div class="p-4 bg-indigo-50 border border-indigo-200 rounded-xl mb-4">
+              <p class="text-xs text-indigo-600 font-bold uppercase tracking-wide mb-1">Primary Borrower</p>
+              <p class="text-xl font-bold text-indigo-900">${primary}</p>
+            </div>
+            <div class="space-y-2">
+              ${allNames.map(([name, count]) => `
+                <div class="flex items-center justify-between p-3 ${count===allNames[0][1]?'bg-emerald-50 border-emerald-200':'bg-amber-50 border-amber-200'} border rounded-xl">
+                  <span class="text-sm font-semibold text-gray-900">${name}</span>
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-gray-500">${count} doc${count>1?'s':''}</span>
+                    <span class="text-xs font-bold ${count===allNames[0][1]?'text-emerald-700 bg-emerald-100':'text-amber-700 bg-amber-100'} px-2 py-1 rounded-lg">
+                      ${count === allNames[0][1] ? '✓ Primary' : '~ Variant'}
+                    </span>
+                  </div>
+                </div>
+              `).join('')}
+            </div>`;
+          })()}
+        </div>
+
+      </div>
+
+      <!-- Side panel -->
+      <div class="space-y-5">
+
+        <!-- Download -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
+          <h3 class="font-bold text-gray-900 mb-4">Downloads</h3>
+          <div class="space-y-3">
+            <button class="w-full bg-indigo-600 text-white rounded-xl py-3 px-4 font-semibold hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all flex items-center justify-center gap-2 text-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              All Redacted PDFs (.zip)
+            </button>
+            <button class="w-full bg-gray-100 text-gray-700 rounded-xl py-3 px-4 font-semibold hover:bg-gray-200 transition-all flex items-center justify-center gap-2 text-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              Export Results CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Summary -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
+          <h3 class="font-bold text-gray-900 mb-4">Summary</h3>
+          <div class="space-y-3">
+            ${[
+              ['Documents',   docs.length],
+              ['Pages Total', docs.reduce((a,d)=>a+d.pages,0)],
+              ['TFNs Found',  totalTFNs],
+              ['Unique Names',totalNames],
+              ['Redacted',    totalTFNs > 0 ? totalTFNs+' location'+(totalTFNs>1?'s':'') : 'None'],
+            ].map(([l,v])=>`
+              <div class="flex justify-between items-center">
+                <span class="text-sm text-gray-500">${l}</span>
+                <span class="text-sm font-bold text-gray-900">${v}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        ${totalTFNs > 0 ? `
+          <div class="bg-red-50 border border-red-200 rounded-2xl p-5 slide-in">
+            <div class="flex items-start gap-3">
+              <svg class="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+              <div>
+                <p class="text-sm font-bold text-red-800 mb-1">${totalTFNs} TFN${totalTFNs>1?'s':''} Detected</p>
+                <p class="text-xs text-red-700">Download the redacted version before sharing these documents.</p>
+              </div>
+            </div>
+          </div>
+        ` : `
+          <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 slide-in">
+            <div class="flex items-start gap-3">
+              <svg class="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+              </svg>
+              <div>
+                <p class="text-sm font-bold text-emerald-800 mb-1">No TFNs Found</p>
+                <p class="text-xs text-emerald-700">These documents are safe to share.</p>
+              </div>
+            </div>
+          </div>
+        `}
+
+        <button onclick="go('upload', {files:[]})"
+          class="w-full bg-indigo-600 text-white rounded-xl py-3 px-4 font-semibold hover:bg-indigo-700 transition-all text-sm">
+          Process New Documents
+        </button>
+
+      </div>
+    </div>
+  </main>
+</div>`; }
+
+/* ─────────────────────────────────────────────
+   FILE HANDLING
+───────────────────────────────────────────── */
+function handleFileSelect(e) {
+  addFiles([...e.target.files]);
+}
+function handleDragOver(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.add('drag-over');
+}
+function handleDragLeave(e) {
+  document.getElementById('dropZone').classList.remove('drag-over');
+}
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.remove('drag-over');
+  const files = [...e.dataTransfer.files].filter(f=>f.type==='application/pdf');
+  if (files.length) addFiles(files);
+}
+function addFiles(newFiles) {
+  const existing = new Set(state.files.map(f=>f.name));
+  newFiles.forEach(f => {
+    if (!existing.has(f.name)) state.files.push(f); // keep actual File objects
+  });
+  render();
+}
+function removeFile(i) {
+  state.files.splice(i,1);
+  render();
+}
+
+/* ─────────────────────────────────────────────
+   SCREEN: PROFILE
+───────────────────────────────────────────── */
+function profileScreen() {
+  const usagePercent = 53; // 47 of 100 credits used (mock)
+  return `
+<div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+      <button onclick="go('dashboard')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors font-medium">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Dashboard
+      </button>
+      <button onclick="go('login')"
+        class="flex items-center gap-2 text-red-500 hover:text-red-700 font-medium text-sm transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+        </svg>
+        Sign Out
+      </button>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Profile hero -->
+    <div class="bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-2xl p-8 mb-6 slide-in shadow-lg shadow-indigo-200">
+      <div class="flex items-center gap-6">
+        <div class="relative">
+          <div class="w-20 h-20 bg-white/20 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-inner">
+            SJ
+          </div>
+          <button class="absolute -bottom-1 -right-1 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-md hover:bg-gray-50 transition-colors">
+            <svg class="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="flex-1">
+          <h1 class="text-2xl font-bold text-white mb-1">Sarah Johnson</h1>
+          <p class="text-indigo-200 mb-1">sarah.johnson@capitalmortgage.com.au</p>
+          <p class="text-indigo-300 text-sm">Capital Mortgage Group &nbsp;·&nbsp; Senior Processor</p>
+        </div>
+        <div class="hidden md:flex items-center gap-2 bg-white/10 rounded-xl px-4 py-2">
+          <div class="w-2 h-2 bg-emerald-400 rounded-full"></div>
+          <span class="text-white text-sm font-medium">Active</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-6">
+
+      <!-- Left col -->
+      <div class="lg:col-span-2 space-y-6">
+
+        <!-- Personal info -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-lg font-bold text-gray-900">Personal Information</h2>
+            <button id="editInfoBtn" onclick="toggleEditInfo()" class="text-sm font-semibold text-indigo-600 hover:text-indigo-700 flex items-center gap-1.5 transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+              </svg>
+              Edit
+            </button>
+          </div>
+          <div id="infoView" class="grid sm:grid-cols-2 gap-4">
+            ${[
+              { label:'Full Name',    value:'Sarah Johnson',                      icon:'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
+              { label:'Email',        value:'sarah.johnson@capitalmortgage.com.au',icon:'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+              { label:'Company',      value:'Capital Mortgage Group',             icon:'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
+              { label:'Role',         value:'Senior Mortgage Processor',          icon:'M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+              { label:'Phone',        value:'+61 2 9876 5432',                    icon:'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z' },
+              { label:'Location',     value:'Sydney, NSW, Australia',             icon:'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z' },
+            ].map(f=>`
+              <div class="p-4 bg-gray-50 rounded-xl">
+                <div class="flex items-center gap-2 mb-1">
+                  <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${f.icon}"/>
+                  </svg>
+                  <p class="text-xs text-gray-500 font-medium uppercase tracking-wide">${f.label}</p>
+                </div>
+                <p class="text-sm font-semibold text-gray-900 truncate">${f.value}</p>
+              </div>
+            `).join('')}
+          </div>
+          <div id="infoEdit" class="hidden grid sm:grid-cols-2 gap-4">
+            ${[
+              ['Full Name',  'Sarah Johnson'],
+              ['Email',      'sarah.johnson@capitalmortgage.com.au'],
+              ['Company',    'Capital Mortgage Group'],
+              ['Role',       'Senior Mortgage Processor'],
+              ['Phone',      '+61 2 9876 5432'],
+              ['Location',   'Sydney, NSW, Australia'],
+            ].map(([l,v])=>`
+              <div>
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">${l}</label>
+                <input value="${v}" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all"/>
+              </div>
+            `).join('')}
+            <div class="sm:col-span-2 flex gap-3 pt-2">
+              <button onclick="toggleEditInfo()" class="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors">Save Changes</button>
+              <button onclick="toggleEditInfo()" class="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-200 transition-colors">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Activity log -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-lg font-bold text-gray-900">Recent Activity</h2>
+            <button class="text-sm text-indigo-600 hover:text-indigo-700 font-medium">Export CSV</button>
+          </div>
+          <div class="space-y-3">
+            ${[
+              { action:'Processed 3 documents',  detail:'James Robertson loan file',   time:'5 mins ago',  icon:'📄', color:'bg-blue-100 text-blue-600'    },
+              { action:'Downloaded redacted PDF', detail:'ANZ_Statement_Q1.pdf',        time:'8 mins ago',  icon:'⬇',  color:'bg-purple-100 text-purple-600' },
+              { action:'TFN detected & redacted', detail:'Tax_Return_2024.pdf · p.2',  time:'8 mins ago',  icon:'🔒', color:'bg-red-100 text-red-600'       },
+              { action:'Processed 2 documents',  detail:'Emily Nguyen loan file',      time:'22 mins ago', icon:'📄', color:'bg-blue-100 text-blue-600'     },
+              { action:'Exported CSV report',     detail:'16 documents · this session', time:'1 hr ago',   icon:'📊', color:'bg-green-100 text-green-600'   },
+            ].map(a=>`
+              <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
+                <div class="w-9 h-9 ${a.color} rounded-lg flex items-center justify-center text-base flex-shrink-0">
+                  ${a.icon}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-semibold text-gray-900">${a.action}</p>
+                  <p class="text-xs text-gray-500 truncate">${a.detail}</p>
+                </div>
+                <span class="text-xs text-gray-400 flex-shrink-0">${a.time}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right col -->
+      <div class="space-y-6">
+
+        <!-- Usage & plan -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
+          <h3 class="font-bold text-gray-900 mb-4">Usage This Month</h3>
+          <div class="space-y-4">
+            <div>
+              <div class="flex justify-between text-sm mb-2">
+                <span class="text-gray-600">Documents Processed</span>
+                <span class="font-bold text-gray-900">53 / 100</span>
+              </div>
+              <div class="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                <div class="h-full bg-indigo-600 rounded-full transition-all" style="width:${usagePercent}%"></div>
+              </div>
+              <p class="text-xs text-gray-400 mt-1">${100 - usagePercent} documents remaining</p>
+            </div>
+            <div>
+              <div class="flex justify-between text-sm mb-2">
+                <span class="text-gray-600">TFNs Redacted</span>
+                <span class="font-bold text-gray-900">8</span>
+              </div>
+              <div class="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                <div class="h-full bg-red-500 rounded-full" style="width:8%"></div>
+              </div>
+            </div>
+            <div class="pt-2 border-t border-gray-100">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Reset date</span>
+                <span class="font-semibold text-gray-900">1 May 2025</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Plan -->
+        <div class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-6 text-white slide-in shadow-lg shadow-indigo-200">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <p class="text-indigo-200 text-xs font-semibold uppercase tracking-wide">Current Plan</p>
+              <p class="text-xl font-bold mt-0.5">Professional</p>
+            </div>
+            <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+              </svg>
+            </div>
+          </div>
+          <div class="space-y-2 mb-5">
+            ${['100 documents / month','All document types','TFN + name extraction','Redacted PDF download','CSV export'].map(f=>`
+              <div class="flex items-center gap-2 text-sm text-indigo-100">
+                <svg class="w-4 h-4 text-emerald-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+                ${f}
+              </div>
+            `).join('')}
+          </div>
+          <button class="w-full bg-white text-indigo-700 rounded-xl py-2.5 font-bold text-sm hover:bg-indigo-50 transition-colors">
+            Upgrade to Enterprise
+          </button>
+        </div>
+
+        <!-- Preferences -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
+          <h3 class="font-bold text-gray-900 mb-4">Preferences</h3>
+          <div class="space-y-4">
+            ${[
+              { label:'Email report after processing', on:true  },
+              { label:'Auto-redact TFNs',              on:true  },
+              { label:'Flag name mismatches',          on:true  },
+              { label:'Dark mode',                     on:false },
+            ].map((p,i)=>`
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-gray-700">${p.label}</span>
+                <button onclick="togglePref(${i})" id="pref_${i}"
+                  class="relative w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none ${p.on ? 'bg-indigo-600' : 'bg-gray-200'}">
+                  <div id="prefDot_${i}" class="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${p.on ? 'translate-x-5' : 'translate-x-0.5'}"></div>
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Danger zone -->
+        <div class="bg-white rounded-2xl shadow-sm border border-red-100 p-6 slide-in">
+          <h3 class="font-bold text-red-600 mb-4">Danger Zone</h3>
+          <div class="space-y-3">
+            <button class="w-full text-left px-4 py-3 border border-red-200 rounded-xl text-sm font-semibold text-red-600 hover:bg-red-50 transition-colors">
+              Clear Processing History
+            </button>
+            <button class="w-full text-left px-4 py-3 border border-red-200 rounded-xl text-sm font-semibold text-red-600 hover:bg-red-50 transition-colors">
+              Delete Account
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>`; }
+
+/* ─────────────────────────────────────────────
+   PROFILE INTERACTIONS
+───────────────────────────────────────────── */
+function toggleEditInfo() {
+  const view = document.getElementById('infoView');
+  const edit = document.getElementById('infoEdit');
+  const btn  = document.getElementById('editInfoBtn');
+  if (view.classList.contains('hidden')) {
+    view.classList.remove('hidden');
+    edit.classList.add('hidden');
+    btn.textContent = 'Edit';
+  } else {
+    view.classList.add('hidden');
+    edit.classList.remove('hidden');
+    btn.innerHTML = `<svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>Cancel`;
+  }
+}
+
+const prefStates = [true, true, true, false];
+function togglePref(i) {
+  prefStates[i] = !prefStates[i];
+  const btn = document.getElementById(`pref_${i}`);
+  const dot = document.getElementById(`prefDot_${i}`);
+  if (prefStates[i]) {
+    btn.className = btn.className.replace('bg-gray-200','bg-indigo-600');
+    dot.className = dot.className.replace('translate-x-0.5','translate-x-5');
+  } else {
+    btn.className = btn.className.replace('bg-indigo-600','bg-gray-200');
+    dot.className = dot.className.replace('translate-x-5','translate-x-0.5');
+  }
+}
+
+
+/* ─────────────────────────────────────────────
+   RENDER
+───────────────────────────────────────────── */
+const screenMap = {
+  home:       homeScreen,
+  login:      loginScreen,
+  dashboard:  dashboardScreen,
+  upload:     uploadScreen,
+  processing: processingScreen,
+  results:    resultsScreen,
+  profile:    profileScreen,
+};
+
+function render() {
+  document.getElementById('app').innerHTML = (screenMap[state.page] || dashboardScreen)();
+}
+
+render();
+</script>
+</body>
+</html>

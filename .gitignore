@@ -1,0 +1,29 @@
+# Environment — never commit credentials
+.env
+*.json.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Database — local only
+backend/mortgagedoc.db
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Temp credentials written at runtime
+/tmp/
