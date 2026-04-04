@@ -2,9 +2,11 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+import json
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from typing import List
+import io
 
 from processors.document_ai import process_document_with_ocr
 from database import get_db, log_audit
@@ -32,8 +34,8 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
         # Persist to DB
         cursor = db.execute(
             """INSERT INTO documents
-               (filename, pages, status, file_size, tfn_count, name_count, error_msg)
-               VALUES (?,?,?,?,?,?,?)""",
+               (filename, pages, status, file_size, tfn_count, name_count, error_msg, file_bytes)
+               VALUES (?,?,?,?,?,?,?,?)""",
             (
                 result.filename,
                 result.total_pages,
@@ -42,17 +44,22 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
                 len(result.all_tfns),
                 len(result.names),
                 result.error,
+                content,
             ),
         )
         doc_id = cursor.lastrowid
 
         for tfn in result.all_tfns:
+            boxes_json = json.dumps([
+                {"x": b.x, "y": b.y, "width": b.width, "height": b.height, "page": b.page}
+                for b in tfn.bounding_boxes
+            ])
             db.execute(
                 """INSERT INTO tfns
-                   (document_id, normalized, formatted, page_number, confidence, is_valid)
-                   VALUES (?,?,?,?,?,?)""",
+                   (document_id, normalized, formatted, page_number, confidence, is_valid, bounding_boxes)
+                   VALUES (?,?,?,?,?,?,?)""",
                 (doc_id, tfn.normalized, tfn.formatted, tfn.page_number,
-                 tfn.confidence, 1 if tfn.is_valid else 0),
+                 tfn.confidence, 1 if tfn.is_valid else 0, boxes_json),
             )
 
         for name in result.names:
@@ -165,3 +172,109 @@ def get_audit(limit: int = 50):
     ).fetchall()
     db.close()
     return {"log": [dict(r) for r in rows]}
+
+
+class RedactRequest(dict):
+    pass
+
+
+@router.post("/{doc_id}/redact")
+async def redact_document(
+    doc_id: int,
+    body: dict,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Redact selected TFNs from a document and return the redacted PDF.
+
+    Body: { "redact_tfns": ["123456782", ...] }
+    Returns: application/pdf
+    """
+    import fitz  # pymupdf
+
+    redact_tfns = set(body.get("redact_tfns", []))
+    if not redact_tfns:
+        raise HTTPException(status_code=400, detail="No TFNs specified for redaction.")
+
+    db = get_db()
+    doc_row = db.execute(
+        "SELECT filename, file_bytes FROM documents WHERE id=?", (doc_id,)
+    ).fetchone()
+
+    if not doc_row:
+        db.close()
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    file_bytes = doc_row["file_bytes"]
+    filename   = doc_row["filename"]
+
+    if not file_bytes:
+        db.close()
+        raise HTTPException(status_code=422, detail="Original file not stored. Re-upload to redact.")
+
+    # Get bounding boxes for the TFNs to redact
+    tfn_rows = db.execute(
+        "SELECT normalized, bounding_boxes FROM tfns WHERE document_id=?", (doc_id,)
+    ).fetchall()
+    db.close()
+
+    # Build page → list of rect mappings
+    boxes_to_redact = []
+    for row in tfn_rows:
+        if row["normalized"] not in redact_tfns:
+            continue
+        if not row["bounding_boxes"]:
+            continue
+        for b in json.loads(row["bounding_boxes"]):
+            boxes_to_redact.append(b)
+
+    # Determine file type
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "pdf"
+
+    # For images, convert to PDF first via pymupdf
+    if ext in ("jpg", "jpeg", "png", "tiff", "tif", "bmp", "webp"):
+        img_doc = fitz.open(stream=file_bytes, filetype=ext)
+        pdf_bytes_io = io.BytesIO(img_doc.convert_to_pdf())
+        pdf_bytes_io.seek(0)
+        pdf_bytes = pdf_bytes_io.read()
+        img_doc.close()
+    else:
+        pdf_bytes = file_bytes
+
+    # Open with pymupdf and apply redaction
+    pdf = fitz.open(stream=pdf_bytes, filetype="pdf")
+
+    for page in pdf:
+        page_num  = page.number + 1  # pymupdf is 0-indexed
+        page_rect = page.rect
+        w = page_rect.width
+        h = page_rect.height
+
+        for b in boxes_to_redact:
+            if b["page"] != page_num:
+                continue
+            # Convert normalised coords → points
+            x0 = b["x"] * w
+            y0 = b["y"] * h
+            x1 = (b["x"] + b["width"])  * w
+            y1 = (b["y"] + b["height"]) * h
+            # Add a small padding so the box fully covers the text
+            pad = 3
+            rect = fitz.Rect(x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+            page.add_redact_annot(rect, fill=(0, 0, 0))
+
+        page.apply_redactions()
+
+    redacted_bytes = pdf.tobytes(garbage=4, deflate=True)
+    pdf.close()
+
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    out_name = f"{stem}_redacted.pdf"
+
+    log_audit("redact", f"{filename} — {len(redact_tfns)} TFN(s) redacted")
+
+    return StreamingResponse(
+        io.BytesIO(redacted_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
+    )

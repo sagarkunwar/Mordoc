@@ -1267,24 +1267,73 @@ function setAllRedact(di, value) {
   render(); // full re-render to update all chips at once
 }
 
-function confirmRedaction() {
-  const chosen = Object.entries(redactChoices)
-    .filter(([,v]) => v)
-    .map(([k]) => k);
-  if (chosen.length === 0) {
+async function confirmRedaction() {
+  const docs = (state.results || []).map(r => ({
+    id:   r.id,
+    name: r.filename,
+    tfns: r.tfns || [],
+  }));
+
+  const toRedact = docs.map((doc, di) => ({
+    doc_id: doc.id,
+    filename: doc.name,
+    redact_tfns: doc.tfns
+      .filter((_, ti) => redactChoices[`${di}_${ti}`] !== false)
+      .map(t => t.normalized),
+  })).filter(d => d.redact_tfns.length > 0);
+
+  if (toRedact.length === 0) {
     alert('No TFNs selected for redaction. Toggle at least one to "Redact" first.');
     return;
   }
-  // TODO (Prompt 2): send chosen keys to backend /api/documents/redact
-  // For now, show a confirmation toast
+
   const btn = document.querySelector('button[onclick="confirmRedaction()"]');
   if (btn) {
-    btn.textContent = 'Redaction confirmed — download ready';
-    btn.className = btn.className.replace('bg-red-600 hover:bg-red-700','bg-emerald-600 hover:bg-emerald-700');
-    btn.onclick = null;
+    btn.textContent = 'Generating redacted PDF…';
+    btn.disabled = true;
+    btn.className = btn.className.replace('bg-red-600 hover:bg-red-700', 'bg-gray-400 cursor-not-allowed');
   }
-  const dl = document.querySelector('button.bg-indigo-600');
-  if (dl) dl.classList.remove('opacity-40', 'pointer-events-none');
+
+  try {
+    // Download each document's redacted PDF
+    for (const item of toRedact) {
+      const resp = await authFetch(`${API_BASE}/api/documents/${item.doc_id}/redact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ redact_tfns: item.redact_tfns }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `Server error ${resp.status}`);
+      }
+
+      // Trigger browser download
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      const stem = item.filename.replace(/\.[^.]+$/, '');
+      a.href     = url;
+      a.download = `${stem}_redacted.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    if (btn) {
+      btn.textContent = 'Redacted PDF downloaded';
+      btn.className = btn.className.replace('bg-gray-400 cursor-not-allowed', 'bg-emerald-600');
+      btn.disabled = false;
+    }
+  } catch (err) {
+    if (btn) {
+      btn.textContent = 'Confirm Redaction';
+      btn.disabled = false;
+      btn.className = btn.className.replace('bg-gray-400 cursor-not-allowed', 'bg-red-600 hover:bg-red-700');
+    }
+    alert('Redaction failed: ' + err.message);
+  }
 }
 
 /* ─────────────────────────────────────────────

@@ -23,17 +23,19 @@ def init_db():
             tfn_count   INTEGER DEFAULT 0,
             name_count  INTEGER DEFAULT 0,
             error_msg   TEXT,
+            file_bytes  BLOB,
             created_at  TEXT    DEFAULT (datetime('now','localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS tfns (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            document_id INTEGER NOT NULL,
-            normalized  TEXT,
-            formatted   TEXT,
-            page_number INTEGER,
-            confidence  REAL,
-            is_valid    INTEGER DEFAULT 1,
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id     INTEGER NOT NULL,
+            normalized      TEXT,
+            formatted       TEXT,
+            page_number     INTEGER,
+            confidence      REAL,
+            is_valid        INTEGER DEFAULT 1,
+            bounding_boxes  TEXT,
             FOREIGN KEY (document_id) REFERENCES documents(id)
         );
 
@@ -52,6 +54,19 @@ def init_db():
         );
     """)
     conn.commit()
+    # Migrations: add columns if they don't exist yet (safe to re-run)
+    for col, definition in [
+        ("file_bytes",     "BLOB"),
+        ("bounding_boxes", "TEXT"),
+    ]:
+        try:
+            if col == "file_bytes":
+                conn.execute(f"ALTER TABLE documents ADD COLUMN {col} {definition}")
+            else:
+                conn.execute(f"ALTER TABLE tfns ADD COLUMN {col} {definition}")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
     conn.close()
 
 
