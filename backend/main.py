@@ -6,10 +6,13 @@ Production: set env vars in Railway dashboard, deploy from GitHub
 """
 import sys, os, json, tempfile
 
-# Allow importing processors/ whether running from TFN/backend/ or TFN/ root
+# Allow importing processors/ (root) and database/routes (backend/) from either CWD
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_backend_dir = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
     sys.path.insert(0, _root)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_root, '.env'))

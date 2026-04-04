@@ -130,6 +130,23 @@ def _get_client():
     return documentai.DocumentProcessorServiceClient(client_options=opts)
 
 
+_MIME_MAP = {
+    'pdf':  'application/pdf',
+    'jpg':  'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png':  'image/png',
+    'tiff': 'image/tiff',
+    'tif':  'image/tiff',
+    'bmp':  'image/bmp',
+    'webp': 'image/webp',
+    'gif':  'image/gif',
+}
+
+def _mime_for(filename: str) -> str:
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    return _MIME_MAP.get(ext, 'application/pdf')
+
+
 def process_document_with_ocr(
     pdf_bytes: bytes, filename: str, file_size: int = 0
 ) -> DocumentResult:
@@ -154,7 +171,7 @@ def process_document_with_ocr(
         from google.cloud import documentai_v1 as documentai
 
         client = _get_client()
-        raw_doc = documentai.RawDocument(content=pdf_bytes, mime_type="application/pdf")
+        raw_doc = documentai.RawDocument(content=pdf_bytes, mime_type=_mime_for(filename))
         request = documentai.ProcessRequest(
             name=config.ocr_processor_name,
             raw_document=raw_doc,
