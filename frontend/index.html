@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MortgageDoc AI — TFN Processing</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     @keyframes slideIn {
       from { opacity: 0; transform: translateY(18px); }
@@ -68,8 +69,16 @@
 // Relative in production (same origin). Full URL only when opening HTML directly.
 const API_BASE = (window.location.protocol === 'file:') ? 'http://localhost:8000' : '';
 
+// ── Supabase ──────────────────────────────────────────────────────────────────
+const sb = supabase.createClient(
+  'https://bncjthibzexlzdryxjdk.supabase.co',
+  'sb_publishable_yR-U8N_HS25ILJEMwaIHAg_IDIOtlLa'
+);
+
 const state = {
   page: 'home',
+  user: null,       // Supabase user object
+  session: null,    // Supabase session
   files: [],        // actual File objects from drag-drop / file input
   results: null,    // array of doc results from API
   processingError: null,
@@ -80,7 +89,14 @@ const state = {
 /* ─────────────────────────────────────────────
    ROUTER
 ───────────────────────────────────────────── */
+const PROTECTED = ['dashboard','upload','processing','results','profile'];
+
 function go(page, data={}) {
+  if (PROTECTED.includes(page) && !state.user) {
+    state.page = 'login';
+    render();
+    return;
+  }
   Object.assign(state, data);
   state.page = page;
   render();
@@ -143,7 +159,7 @@ function homeScreen() { return `
         <!-- Auth buttons -->
         <div class="flex items-center gap-3">
           <!-- Google -->
-          <button onclick="go('dashboard')"
+          <button onclick="signInWithGoogle()"
             class="hidden sm:flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700
                    hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all">
             <svg class="w-4 h-4" viewBox="0 0 24 24">
@@ -155,7 +171,7 @@ function homeScreen() { return `
             Sign in with Google
           </button>
           <!-- Email -->
-          <button onclick="go('dashboard')"
+          <button onclick="go('login')"
             class="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl
                    hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all">
             Sign In
@@ -194,7 +210,7 @@ function homeScreen() { return `
 
       <!-- CTAs -->
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14 slide-in" style="animation-delay:.15s">
-        <button onclick="go('dashboard')"
+        <button onclick="go('login')"
           class="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white text-lg font-bold rounded-2xl
                  hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-200 hover:-translate-y-0.5 transition-all">
           Start Processing Free
@@ -339,7 +355,7 @@ function homeScreen() { return `
       </div>
 
       <div class="mt-14 text-center">
-        <button onclick="go('dashboard')"
+        <button onclick="go('login')"
           class="px-10 py-4 bg-indigo-600 text-white text-lg font-bold rounded-2xl hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-200 transition-all">
           Try it now — it's free
         </button>
@@ -424,7 +440,7 @@ function homeScreen() { return `
                 </li>
               `).join('')}
             </ul>
-            <button onclick="go('dashboard')" class="w-full py-3 rounded-xl font-bold text-sm transition-all ${p.btn}">
+            <button onclick="go('login')" class="w-full py-3 rounded-xl font-bold text-sm transition-all ${p.btn}">
               ${p.name === 'Enterprise' ? 'Contact Sales' : 'Get Started'}
             </button>
           </div>
@@ -486,11 +502,11 @@ function homeScreen() { return `
         Join 100+ Australian mortgage professionals who use MortgageDoc AI to find and redact TFNs in seconds.
       </p>
       <div class="flex flex-col sm:flex-row gap-4 justify-center">
-        <button onclick="go('dashboard')"
+        <button onclick="go('login')"
           class="px-10 py-4 bg-white text-indigo-700 text-lg font-bold rounded-2xl hover:bg-indigo-50 hover:shadow-xl transition-all">
           Get Started Free
         </button>
-        <button onclick="go('dashboard')"
+        <button onclick="signInWithGoogle()"
           class="px-10 py-4 bg-indigo-500 text-white text-lg font-semibold rounded-2xl hover:bg-indigo-400 transition-all flex items-center justify-center gap-2">
           <svg class="w-5 h-5" viewBox="0 0 24 24">
             <path fill="white" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -586,7 +602,7 @@ function loginScreen() { return `
     </div>
 
     <!-- Google sign-in -->
-    <button onclick="go('dashboard')"
+    <button onclick="signInWithGoogle()"
       class="w-full bg-white border-2 border-gray-200 rounded-xl py-3 px-4 flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-indigo-300 hover:shadow-md transition-all mb-3 group font-medium text-gray-700">
       <svg class="w-6 h-6" viewBox="0 0 24 24">
         <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -597,10 +613,23 @@ function loginScreen() { return `
       Continue with Google
     </button>
 
-    <button onclick="go('dashboard')"
+    <button onclick="toggleEmailForm()"
       class="w-full bg-indigo-600 text-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 hover:bg-indigo-700 hover:shadow-lg hover:shadow-indigo-200 transition-all font-semibold">
       Sign in with Email
     </button>
+
+    <!-- Email / password form (shown when button above is clicked) -->
+    <div id="emailForm" class="hidden mt-4 space-y-3">
+      <input id="loginEmail" type="email" placeholder="Email address"
+        class="w-full border border-gray-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+      <input id="loginPassword" type="password" placeholder="Password"
+        class="w-full border border-gray-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+      <p id="loginError" class="text-red-500 text-xs hidden"></p>
+      <button onclick="signInWithEmail()"
+        class="w-full bg-indigo-600 text-white rounded-xl py-3 font-semibold hover:bg-indigo-700 transition-all">
+        Sign In
+      </button>
+    </div>
 
     <div class="mt-8 pt-6 border-t border-gray-100">
       <div class="grid grid-cols-3 gap-4 text-center">
@@ -643,13 +672,18 @@ function dashboardScreen() { return `
         </div>
         <span class="text-xl font-bold text-gray-900">MortgageDoc AI</span>
       </div>
-      <div class="flex items-center gap-4">
-        <div class="text-right hidden sm:block">
-          <p class="text-sm font-semibold text-gray-900">Sarah Johnson</p>
-          <p class="text-xs text-gray-500">Capital Mortgage Group</p>
-        </div>
-        <button onclick="go('profile')" class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center font-bold text-indigo-600 hover:bg-indigo-200 hover:ring-2 hover:ring-indigo-300 transition-all">SJ</button>
-      </div>
+      ${(()=>{
+        const email    = state.user?.email || '';
+        const name     = state.user?.user_metadata?.full_name || email.split('@')[0] || 'User';
+        const initials = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase() || 'U';
+        return `<div class="flex items-center gap-4">
+          <div class="text-right hidden sm:block">
+            <p class="text-sm font-semibold text-gray-900">${name}</p>
+            <p class="text-xs text-gray-500">${email}</p>
+          </div>
+          <button onclick="go('profile')" class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center font-bold text-indigo-600 hover:bg-indigo-200 hover:ring-2 hover:ring-indigo-300 transition-all">${initials}</button>
+        </div>`;
+      })()}
     </div>
   </header>
 
@@ -1038,7 +1072,7 @@ async function processFiles() {
 
   try {
     const [apiData] = await Promise.all([
-      fetch(`${API_BASE}/api/documents/process`, { method: 'POST', body: formData })
+      authFetch(`${API_BASE}/api/documents/process`, { method: 'POST', body: formData })
         .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); }),
       animDone,
     ]);
@@ -1057,8 +1091,8 @@ async function processFiles() {
 async function loadDashboardData() {
   try {
     const [statsRes, histRes] = await Promise.all([
-      fetch(`${API_BASE}/api/documents/stats`),
-      fetch(`${API_BASE}/api/documents/history?limit=5`),
+      authFetch(`${API_BASE}/api/documents/stats`),
+      authFetch(`${API_BASE}/api/documents/history?limit=5`),
     ]);
     if (!statsRes.ok || !histRes.ok) return;
     const stats       = await statsRes.json();
@@ -1385,7 +1419,7 @@ function profileScreen() {
         </svg>
         Dashboard
       </button>
-      <button onclick="go('login')"
+      <button onclick="signOut()"
         class="flex items-center gap-2 text-red-500 hover:text-red-700 font-medium text-sm transition-colors">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1665,7 +1699,67 @@ function render() {
   document.getElementById('app').innerHTML = (screenMap[state.page] || dashboardScreen)();
 }
 
-render();
+/* ─────────────────────────────────────────────
+   AUTH
+───────────────────────────────────────────── */
+async function authFetch(url, opts = {}) {
+  const { data: { session } } = await sb.auth.getSession();
+  const headers = { ...(opts.headers || {}) };
+  if (session) headers['Authorization'] = `Bearer ${session.access_token}`;
+  return fetch(url, { ...opts, headers });
+}
+
+async function signInWithGoogle() {
+  await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin + window.location.pathname },
+  });
+}
+
+async function signInWithEmail() {
+  const email    = document.getElementById('loginEmail')?.value?.trim();
+  const password = document.getElementById('loginPassword')?.value;
+  const errorEl  = document.getElementById('loginError');
+  if (!email || !password) {
+    errorEl.textContent = 'Please enter your email and password.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    errorEl.textContent = error.message;
+    errorEl.classList.remove('hidden');
+  }
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  state.user = null;
+  state.session = null;
+  go('home');
+}
+
+function toggleEmailForm() {
+  document.getElementById('emailForm')?.classList.toggle('hidden');
+}
+
+// ── Listen for auth state changes (login, logout, token refresh) ──────────────
+sb.auth.onAuthStateChange((event, session) => {
+  state.session = session;
+  state.user    = session?.user ?? null;
+  if (event === 'SIGNED_IN')  go('dashboard');
+  if (event === 'SIGNED_OUT') { state.page = 'home'; render(); }
+});
+
+// ── On load: restore existing session then render ─────────────────────────────
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  state.session = session;
+  state.user    = session?.user ?? null;
+  if (session && state.page === 'home') state.page = 'dashboard';
+  render();
+  if (state.page === 'dashboard') loadDashboardData();
+})();
 </script>
 </body>
 </html>

@@ -2,18 +2,19 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from typing import List
 
 from processors.document_ai import process_document_with_ocr
 from database import get_db, log_audit
+from auth import get_current_user
 
 router = APIRouter()
 
 
 @router.post("/process")
-async def process_documents(files: List[UploadFile] = File(...)):
+async def process_documents(files: List[UploadFile] = File(...), user: dict = Depends(get_current_user)):
     """
     Accept one or more PDF uploads.
     Returns JSON with per-file results (TFNs, names, pages).
