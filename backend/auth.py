@@ -6,6 +6,7 @@ from fastapi import Header, HTTPException
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://bncjthibzexlzdryxjdk.supabase.co")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "sb_publishable_yR-U8N_HS25ILJEMwaIHAg_IDIOtlLa")
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "true").lower() == "true"
+SUPER_ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("SUPER_ADMIN_EMAILS", "").split(",") if e.strip()}
 
 
 async def get_current_user(authorization: str = Header(default=None)) -> dict:
@@ -34,4 +35,6 @@ async def get_current_user(authorization: str = Header(default=None)) -> dict:
     if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
-    return resp.json()
+    user = resp.json()
+    user["is_super_admin"] = user.get("email", "").lower() in SUPER_ADMIN_EMAILS
+    return user
