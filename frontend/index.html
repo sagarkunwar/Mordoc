@@ -1164,7 +1164,9 @@ async function processFiles() {
       animDone,
     ]);
     state.results = apiData.results;
-    state.files   = [];  // clear queue after processing
+    state.files   = [];
+    // Reset redaction choices for fresh results
+    Object.keys(redactChoices).forEach(k => delete redactChoices[k]);
     go('results');
   } catch (err) {
     state.processingError = err.message.includes('fetch')
@@ -1220,6 +1222,72 @@ function timeAgo(dateStr) {
 }
 
 /* ─────────────────────────────────────────────
+   REDACTION STATE
+   Key: "docIndex_tfnIndex" → true (redact) / false (keep)
+───────────────────────────────────────────── */
+const redactChoices = {};   // populated on first results render
+
+function initRedactChoices(docs) {
+  docs.forEach((doc, di) => {
+    doc.tfns.forEach((_, ti) => {
+      const key = `${di}_${ti}`;
+      if (!(key in redactChoices)) redactChoices[key] = true; // default: redact
+    });
+  });
+}
+
+function toggleRedact(di, ti) {
+  const key = `${di}_${ti}`;
+  redactChoices[key] = !redactChoices[key];
+  // Re-render only the TFN chip row without full page reload
+  const chip = document.getElementById(`tfn_${di}_${ti}`);
+  if (chip) {
+    const will = redactChoices[key];
+    chip.className = `inline-flex items-center gap-2 border rounded-lg px-3 py-2 mr-2 mb-2 transition-all ${will ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`;
+    const label = chip.querySelector('.redact-label');
+    if (label) {
+      label.textContent = will ? 'Redact' : 'Keep';
+      label.className = `redact-label text-xs font-semibold px-2 py-0.5 rounded-md transition-all ${will ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`;
+    }
+    const num = chip.querySelector('.tfn-num');
+    if (num) num.className = `tfn-chip text-sm font-mono font-bold ${will ? 'text-red-800' : 'text-gray-500 line-through'}`;
+  }
+  // Update sidebar count
+  const countEl = document.getElementById('redactCount');
+  if (countEl) {
+    const n = Object.values(redactChoices).filter(Boolean).length;
+    countEl.textContent = n;
+  }
+}
+
+function setAllRedact(di, value) {
+  Object.keys(redactChoices).forEach(key => {
+    if (key.startsWith(`${di}_`)) redactChoices[key] = value;
+  });
+  render(); // full re-render to update all chips at once
+}
+
+function confirmRedaction() {
+  const chosen = Object.entries(redactChoices)
+    .filter(([,v]) => v)
+    .map(([k]) => k);
+  if (chosen.length === 0) {
+    alert('No TFNs selected for redaction. Toggle at least one to "Redact" first.');
+    return;
+  }
+  // TODO (Prompt 2): send chosen keys to backend /api/documents/redact
+  // For now, show a confirmation toast
+  const btn = document.querySelector('button[onclick="confirmRedaction()"]');
+  if (btn) {
+    btn.textContent = 'Redaction confirmed — download ready';
+    btn.className = btn.className.replace('bg-red-600 hover:bg-red-700','bg-emerald-600 hover:bg-emerald-700');
+    btn.onclick = null;
+  }
+  const dl = document.querySelector('button.bg-indigo-600');
+  if (dl) dl.classList.remove('opacity-40', 'pointer-events-none');
+}
+
+/* ─────────────────────────────────────────────
    SCREEN: RESULTS
 ───────────────────────────────────────────── */
 function resultsScreen() {
@@ -1234,8 +1302,11 @@ function resultsScreen() {
     names:  r.names || [],
   }));
 
-  const totalTFNs  = docs.reduce((a, d) => a + d.tfns.length, 0);
-  const totalNames = new Set(docs.flatMap(d => d.names)).size;
+  initRedactChoices(docs);
+
+  const totalTFNs   = docs.reduce((a, d) => a + d.tfns.length, 0);
+  const toRedact    = Object.values(redactChoices).filter(Boolean).length;
+  const totalNames  = new Set(docs.flatMap(d => d.names)).size;
 
   return `
 <div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -1262,25 +1333,41 @@ function resultsScreen() {
 
   <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-    <!-- Success banner -->
-    <div class="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl p-7 text-white mb-8 slide-in shadow-lg shadow-emerald-200">
-      <div class="flex items-start gap-4">
+    <!-- Banner -->
+    ${totalTFNs > 0 ? `
+    <div class="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-6 text-white mb-8 slide-in shadow-lg shadow-amber-200">
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+        </div>
+        <div class="flex-1">
+          <h1 class="text-xl font-bold mb-0.5">Action Required — TFNs Detected</h1>
+          <p class="text-amber-100 text-sm">${totalTFNs} Tax File Number${totalTFNs!==1?'s':''} found across ${docs.length} document${docs.length!==1?'s':''}. Review each TFN below and choose to <strong>Redact</strong> or <strong>Keep</strong> before downloading.</p>
+        </div>
+        <div class="hidden sm:flex flex-col items-center bg-white/20 rounded-xl px-5 py-3 text-center flex-shrink-0">
+          <span class="text-3xl font-bold" id="redactCount">${toRedact}</span>
+          <span class="text-xs text-amber-100 mt-0.5">to redact</span>
+        </div>
+      </div>
+    </div>
+    ` : `
+    <div class="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl p-6 text-white mb-8 slide-in shadow-lg shadow-emerald-200">
+      <div class="flex items-center gap-4">
         <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
           <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
           </svg>
         </div>
         <div class="flex-1">
-          <h1 class="text-2xl font-bold mb-1">Processing Complete</h1>
-          <p class="text-emerald-100">${docs.length} documents processed · ${totalTFNs} TFN${totalTFNs!==1?'s':''} detected · ${totalNames} unique names found</p>
-        </div>
-        <div class="hidden sm:grid grid-cols-3 gap-4 text-center">
-          <div><div class="text-2xl font-bold">${docs.length}</div><div class="text-xs text-emerald-200">Docs</div></div>
-          <div><div class="text-2xl font-bold text-red-200">${totalTFNs}</div><div class="text-xs text-emerald-200">TFNs</div></div>
-          <div><div class="text-2xl font-bold">${totalNames}</div><div class="text-xs text-emerald-200">Names</div></div>
+          <h1 class="text-xl font-bold mb-0.5">All Clear — No TFNs Found</h1>
+          <p class="text-emerald-100 text-sm">${docs.length} document${docs.length!==1?'s':''} processed · ${totalNames} unique name${totalNames!==1?'s':''} extracted · Safe to share.</p>
         </div>
       </div>
     </div>
+    `}
 
     <div class="grid lg:grid-cols-3 gap-6">
       <div class="lg:col-span-2 space-y-5">
@@ -1306,17 +1393,34 @@ function resultsScreen() {
 
             <!-- TFNs -->
             <div class="mb-4">
-              <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Tax File Numbers</p>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Tax File Numbers</p>
+                ${doc.tfns.length > 0 ? `
+                <div class="flex gap-2">
+                  <button onclick="setAllRedact(${i},true)" class="text-xs text-red-600 hover:text-red-800 font-semibold">Redact all</button>
+                  <span class="text-gray-300">|</span>
+                  <button onclick="setAllRedact(${i},false)" class="text-xs text-gray-500 hover:text-gray-700 font-semibold">Keep all</button>
+                </div>` : ''}
+              </div>
               ${doc.tfns.length === 0
                 ? `<span class="text-sm text-gray-400">None detected</span>`
-                : doc.tfns.map(t=>`
-                    <div class="inline-flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mr-2">
-                      <span class="tfn-chip text-red-800">${t.val}</span>
-                      <span class="text-xs text-gray-500">p.${t.page}</span>
+                : doc.tfns.map((t,ti)=>{
+                    const key = `${i}_${ti}`;
+                    const will = redactChoices[key] !== false;
+                    return `
+                    <div id="tfn_${i}_${ti}" class="inline-flex items-center gap-2 border rounded-lg px-3 py-2 mr-2 mb-2 transition-all ${will ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}">
+                      <svg class="w-3.5 h-3.5 ${will?'text-red-400':'text-gray-400'} flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+                      </svg>
+                      <span class="tfn-num tfn-chip text-sm font-mono font-bold ${will ? 'text-red-800' : 'text-gray-400 line-through'}">${t.val}</span>
+                      <span class="text-xs text-gray-400">p.${t.page}</span>
                       <span class="text-xs font-bold ${t.conf>=85?'text-emerald-600':'text-amber-600'}">${t.conf}%</span>
-                      <button class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold ml-1">Redact</button>
-                    </div>
-                  `).join('')
+                      <button onclick="toggleRedact(${i},${ti})"
+                        class="redact-label text-xs font-semibold px-2 py-0.5 rounded-md transition-all ${will ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}">
+                        ${will ? 'Redact' : 'Keep'}
+                      </button>
+                    </div>`;
+                  }).join('')
               }
             </div>
 
@@ -1410,7 +1514,7 @@ function resultsScreen() {
               ['Pages Total', docs.reduce((a,d)=>a+d.pages,0)],
               ['TFNs Found',  totalTFNs],
               ['Unique Names',totalNames],
-              ['Redacted',    totalTFNs > 0 ? totalTFNs+' location'+(totalTFNs>1?'s':'') : 'None'],
+              ['To Redact',   `<span id="redactCountSide">${toRedact}</span>`],
             ].map(([l,v])=>`
               <div class="flex justify-between items-center">
                 <span class="text-sm text-gray-500">${l}</span>
@@ -1421,17 +1525,17 @@ function resultsScreen() {
         </div>
 
         ${totalTFNs > 0 ? `
-          <div class="bg-red-50 border border-red-200 rounded-2xl p-5 slide-in">
-            <div class="flex items-start gap-3">
-              <svg class="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 slide-in">
+            <p class="text-sm font-bold text-amber-800 mb-1">Review Required</p>
+            <p class="text-xs text-amber-700 mb-3">Toggle each TFN to <strong>Redact</strong> or <strong>Keep</strong>, then confirm to generate the redacted PDF.</p>
+            <button onclick="confirmRedaction()"
+              class="w-full bg-red-600 text-white rounded-xl py-2.5 text-sm font-bold hover:bg-red-700 hover:shadow-md transition-all flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                  d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
               </svg>
-              <div>
-                <p class="text-sm font-bold text-red-800 mb-1">${totalTFNs} TFN${totalTFNs>1?'s':''} Detected</p>
-                <p class="text-xs text-red-700">Download the redacted version before sharing these documents.</p>
-              </div>
-            </div>
+              Confirm Redaction
+            </button>
           </div>
         ` : `
           <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 slide-in">
