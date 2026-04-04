@@ -615,20 +615,30 @@ function loginScreen() { return `
 
     <button onclick="toggleEmailForm()"
       class="w-full bg-indigo-600 text-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 hover:bg-indigo-700 hover:shadow-lg hover:shadow-indigo-200 transition-all font-semibold">
-      Sign in with Email
+      Continue with Email
     </button>
 
-    <!-- Email / password form (shown when button above is clicked) -->
-    <div id="emailForm" class="hidden mt-4 space-y-3">
-      <input id="loginEmail" type="email" placeholder="Email address"
-        class="w-full border border-gray-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
-      <input id="loginPassword" type="password" placeholder="Password"
-        class="w-full border border-gray-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
-      <p id="loginError" class="text-red-500 text-xs hidden"></p>
-      <button onclick="signInWithEmail()"
-        class="w-full bg-indigo-600 text-white rounded-xl py-3 font-semibold hover:bg-indigo-700 transition-all">
-        Sign In
-      </button>
+    <!-- Email / password form -->
+    <div id="emailForm" class="hidden mt-4">
+      <!-- Sign In / Sign Up tabs -->
+      <div class="flex rounded-xl border border-gray-200 mb-4 overflow-hidden">
+        <button id="tabSignIn" onclick="setAuthTab('signin')"
+          class="flex-1 py-2 text-sm font-semibold bg-indigo-600 text-white transition-all">Sign In</button>
+        <button id="tabSignUp" onclick="setAuthTab('signup')"
+          class="flex-1 py-2 text-sm font-semibold bg-white text-gray-600 hover:bg-gray-50 transition-all">Create Account</button>
+      </div>
+      <div class="space-y-3">
+        <input id="loginEmail" type="email" placeholder="Email address"
+          class="w-full border border-gray-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+        <input id="loginPassword" type="password" placeholder="Password"
+          class="w-full border border-gray-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+        <p id="loginError" class="text-red-500 text-xs hidden"></p>
+        <p id="loginSuccess" class="text-green-600 text-xs hidden"></p>
+        <button id="authSubmitBtn" onclick="submitEmailAuth()"
+          class="w-full bg-indigo-600 text-white rounded-xl py-3 font-semibold hover:bg-indigo-700 transition-all">
+          Sign In
+        </button>
+      </div>
     </div>
 
     <div class="mt-8 pt-6 border-t border-gray-100">
@@ -1716,19 +1726,53 @@ async function signInWithGoogle() {
   });
 }
 
-async function signInWithEmail() {
+let _authTab = 'signin';
+
+function setAuthTab(tab) {
+  _authTab = tab;
+  const si = document.getElementById('tabSignIn');
+  const su = document.getElementById('tabSignUp');
+  const btn = document.getElementById('authSubmitBtn');
+  if (tab === 'signin') {
+    si.className = si.className.replace('bg-white text-gray-600','bg-indigo-600 text-white');
+    su.className = su.className.replace('bg-indigo-600 text-white','bg-white text-gray-600');
+    btn.textContent = 'Sign In';
+  } else {
+    su.className = su.className.replace('bg-white text-gray-600','bg-indigo-600 text-white');
+    si.className = si.className.replace('bg-indigo-600 text-white','bg-white text-gray-600');
+    btn.textContent = 'Create Account';
+  }
+  document.getElementById('loginError')?.classList.add('hidden');
+  document.getElementById('loginSuccess')?.classList.add('hidden');
+}
+
+async function submitEmailAuth() {
   const email    = document.getElementById('loginEmail')?.value?.trim();
   const password = document.getElementById('loginPassword')?.value;
   const errorEl  = document.getElementById('loginError');
+  const successEl = document.getElementById('loginSuccess');
+  errorEl.classList.add('hidden');
+  successEl.classList.add('hidden');
   if (!email || !password) {
     errorEl.textContent = 'Please enter your email and password.';
     errorEl.classList.remove('hidden');
     return;
   }
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  if (error) {
-    errorEl.textContent = error.message;
-    errorEl.classList.remove('hidden');
+  if (_authTab === 'signup') {
+    const { error } = await sb.auth.signUp({ email, password });
+    if (error) {
+      errorEl.textContent = error.message;
+      errorEl.classList.remove('hidden');
+    } else {
+      successEl.textContent = 'Account created! Check your email to confirm, then sign in.';
+      successEl.classList.remove('hidden');
+    }
+  } else {
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      errorEl.textContent = error.message;
+      errorEl.classList.remove('hidden');
+    }
   }
 }
 
