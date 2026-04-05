@@ -138,7 +138,7 @@ def _run_anchor_analysis(enriched_docs: list) -> dict | None:
 
 # ── routes ────────────────────────────────────────────────────────────────────
 
-@router.post("")
+@router.post("/create")
 async def create_case(body: dict, user: dict = Depends(get_current_user)):
     """Create a new case. Body: { client_name: str }"""
     client_name = (body.get("client_name") or "").strip()
@@ -159,7 +159,7 @@ async def create_case(body: dict, user: dict = Depends(get_current_user)):
     return {"case": _case_row_to_dict(case)}
 
 
-@router.get("")
+@router.get("/list")
 def list_cases(user: dict = Depends(get_current_user)):
     """List all cases, newest first."""
     db = get_db()

@@ -2333,7 +2333,7 @@ function caseDetailScreen() {
 ───────────────────────────────────────────── */
 async function loadCasesData() {
   try {
-    const res = await authFetch(`${API_BASE}/api/cases`);
+    const res = await authFetch(`${API_BASE}/api/cases/list`);
     if (!res.ok) return;
     const data = await res.json();
     state.cases = data.cases || [];
@@ -2375,7 +2375,7 @@ async function createNewCase() {
   }
 
   try {
-    const res = await authFetch(`${API_BASE}/api/cases`, {
+    const res = await authFetch(`${API_BASE}/api/cases/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_name: name }),
