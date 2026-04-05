@@ -25,17 +25,20 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
         raise HTTPException(status_code=400, detail="No files uploaded.")
 
     results = []
+    raw_results = []   # DocumentResult objects for anchor analysis
     db = get_db()
 
     for upload in files:
         content = await upload.read()
         result = process_document_with_ocr(content, upload.filename, len(content))
+        raw_results.append(result)
 
         # Persist to DB
         cursor = db.execute(
             """INSERT INTO documents
-               (filename, pages, status, file_size, tfn_count, name_count, error_msg, file_bytes)
-               VALUES (?,?,?,?,?,?,?,?)""",
+               (filename, pages, status, file_size, tfn_count, name_count,
+                error_msg, file_bytes, doc_type, tier)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (
                 result.filename,
                 result.total_pages,
@@ -45,6 +48,8 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
                 len(result.names),
                 result.error,
                 content,
+                result.doc_type,
+                result.tier,
             ),
         )
         doc_id = cursor.lastrowid
@@ -82,6 +87,8 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
             "status": result.status,
             "error": result.error,
             "file_size": len(content),
+            "doc_type": result.doc_type,
+            "tier": result.tier,
             "tfns": [
                 {
                     "formatted": t.formatted,
@@ -95,8 +102,35 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
             "names": result.names,
         })
 
+    db.commit()
+
+    # ── Packet-level anchor analysis ─────────────────────────────────────────
+    from processors.name_comparator import analyse_packet
+    packet = analyse_packet(raw_results)
+    anchor_payload = None
+    if packet:
+        anchor_payload = {
+            "anchor_index":    packet.anchor_index,
+            "anchor_filename": packet.anchor_filename,
+            "anchor_doc_type": packet.anchor_doc_type,
+            "anchor_tier":     packet.anchor_tier,
+            "anchor_name":     packet.anchor_name,
+            "comparisons": [
+                {
+                    "doc_index":       c.doc_index,
+                    "filename":        c.filename,
+                    "names_found":     c.names_found,
+                    "best_match_name": c.best_match_name,
+                    "best_score":      round(c.best_score, 1),
+                    "flag":            c.flag,
+                    "reason":          c.reason,
+                }
+                for c in packet.comparisons
+            ],
+        }
+
     db.close()
-    return {"results": results}
+    return {"results": results, "anchor": anchor_payload}
 
 
 @router.get("/history")

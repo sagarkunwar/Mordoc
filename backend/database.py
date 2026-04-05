@@ -24,6 +24,8 @@ def init_db():
             name_count  INTEGER DEFAULT 0,
             error_msg   TEXT,
             file_bytes  BLOB,
+            doc_type    TEXT    DEFAULT 'Unknown Document',
+            tier        INTEGER DEFAULT 5,
             created_at  TEXT    DEFAULT (datetime('now','localtime'))
         );
 
@@ -55,15 +57,14 @@ def init_db():
     """)
     conn.commit()
     # Migrations: add columns if they don't exist yet (safe to re-run)
-    for col, definition in [
-        ("file_bytes",     "BLOB"),
-        ("bounding_boxes", "TEXT"),
+    for table, col, definition in [
+        ("documents", "file_bytes",     "BLOB"),
+        ("tfns",      "bounding_boxes", "TEXT"),
+        ("documents", "doc_type",       "TEXT DEFAULT 'Unknown Document'"),
+        ("documents", "tier",           "INTEGER DEFAULT 5"),
     ]:
         try:
-            if col == "file_bytes":
-                conn.execute(f"ALTER TABLE documents ADD COLUMN {col} {definition}")
-            else:
-                conn.execute(f"ALTER TABLE tfns ADD COLUMN {col} {definition}")
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
             conn.commit()
         except Exception:
             pass  # column already exists

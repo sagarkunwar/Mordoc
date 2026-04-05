@@ -33,6 +33,8 @@ class DocumentResult:
     error: Optional[str] = None
     file_size_bytes: int = 0
     raw_document: Optional[Any] = None  # google Document object (used by Prompt 2)
+    doc_type: str = "Unknown Document"  # from document_classifier
+    tier: int = 5                       # 1=Anchor … 4=Contextual, 5=Unknown
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -228,6 +230,10 @@ def process_document_with_ocr(
                 unique_names.append(n)
         unique_names = unique_names[:20]
 
+        # ── Classify document tier ────────────────────────────────────────────
+        from processors.document_classifier import classify_document
+        classification = classify_document(full_text)
+
         return DocumentResult(
             filename=filename,
             total_pages=len(pages),
@@ -237,6 +243,8 @@ def process_document_with_ocr(
             status="processed",
             file_size_bytes=file_size,
             raw_document=document,
+            doc_type=classification.doc_type,
+            tier=classification.tier,
         )
 
     except Exception as exc:
