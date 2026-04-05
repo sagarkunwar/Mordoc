@@ -54,6 +54,28 @@ def init_db():
             detail     TEXT,
             created_at TEXT DEFAULT (datetime('now','localtime'))
         );
+
+        CREATE TABLE IF NOT EXISTS cases (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_name     TEXT    NOT NULL,
+            anchor_doc_type TEXT,
+            anchor_name     TEXT,
+            status          TEXT    DEFAULT 'open',
+            doc_count       INTEGER DEFAULT 0,
+            created_at      TEXT    DEFAULT (datetime('now','localtime')),
+            updated_at      TEXT    DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS case_documents (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id         INTEGER NOT NULL,
+            document_id     INTEGER NOT NULL,
+            is_redacted     INTEGER DEFAULT 0,
+            redacted_bytes  BLOB,
+            added_at        TEXT    DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (case_id)     REFERENCES cases(id),
+            FOREIGN KEY (document_id) REFERENCES documents(id)
+        );
     """)
     conn.commit()
     # Migrations: add columns if they don't exist yet (safe to re-run)
@@ -62,6 +84,8 @@ def init_db():
         ("tfns",      "bounding_boxes", "TEXT"),
         ("documents", "doc_type",       "TEXT DEFAULT 'Unknown Document'"),
         ("documents", "tier",           "INTEGER DEFAULT 5"),
+        ("cases",     "anchor_name",    "TEXT"),
+        ("cases",     "anchor_doc_type","TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")

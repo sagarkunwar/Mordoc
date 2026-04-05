@@ -34,6 +34,7 @@ from fastapi.responses import FileResponse
 from database import init_db
 from routes.documents import router as doc_router
 from routes.users import router as user_router
+from routes.cases import router as case_router
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -52,6 +53,7 @@ app.add_middleware(
 # ── API routes ────────────────────────────────────────────────────────────────
 app.include_router(doc_router,  prefix="/api/documents", tags=["Documents"])
 app.include_router(user_router, prefix="/api/users",     tags=["Users"])
+app.include_router(case_router, prefix="/api/cases",     tags=["Cases"])
 
 
 @app.get("/api/health", tags=["Health"])

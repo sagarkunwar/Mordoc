@@ -90,20 +90,23 @@ const sb = supabase.createClient(
 
 const state = {
   page: 'home',
-  user: null,       // Supabase user object
-  session: null,    // Supabase session
-  files: [],        // actual File objects from drag-drop / file input
-  results: null,    // array of doc results from API
-  anchor: null,     // packet-level anchor analysis from API
+  user: null,         // Supabase user object
+  session: null,      // Supabase session
+  files: [],          // actual File objects from drag-drop / file input
+  results: null,      // array of doc results from API
+  anchor: null,       // packet-level anchor analysis from API
   processingError: null,
   stats: { processed:0, tfnsFound:0, namesFound:0, flagged:0 },
   history: [],
+  cases: [],          // list of all cases
+  currentCase: null,  // full case detail {case, documents, anchor}
+  selectedCaseId: null, // case chosen in upload flow
 };
 
 /* ─────────────────────────────────────────────
    ROUTER
 ───────────────────────────────────────────── */
-const PROTECTED = ['dashboard','upload','processing','results','profile'];
+const PROTECTED = ['dashboard','upload','processing','results','profile','cases','caseDetail'];
 
 function go(page, data={}) {
   if (PROTECTED.includes(page) && !state.user) {
@@ -114,8 +117,11 @@ function go(page, data={}) {
   Object.assign(state, data);
   state.page = page;
   render();
-  if (page === 'dashboard') loadDashboardData();
-  if (page === 'profile')   loadProfileData();
+  if (page === 'dashboard')  loadDashboardData();
+  if (page === 'profile')    loadProfileData();
+  if (page === 'cases')      loadCasesData();
+  if (page === 'upload')     loadCasesData();
+  if (page === 'caseDetail') loadCaseDetail(state.currentCase?.case?.id);
 }
 
 /* ─────────────────────────────────────────────
@@ -777,7 +783,15 @@ function dashboardScreen() { return `
         const email    = state.user?.email || '';
         const name     = state.user?.user_metadata?.full_name || email.split('@')[0] || 'User';
         const initials = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase() || 'U';
-        return `<div class="flex items-center gap-4">
+        return `<div class="flex items-center gap-3">
+          <button onclick="go('cases')"
+            class="hidden sm:flex items-center gap-2 px-4 py-2 text-sm font-semibold text-indigo-600 border border-indigo-200 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+            </svg>
+            Cases
+          </button>
           <div class="text-right hidden sm:block">
             <p class="text-sm font-semibold text-gray-900">${name}</p>
             <p class="text-xs text-gray-500">${email}</p>
@@ -1036,6 +1050,47 @@ function uploadScreen() {
       </div>
     ` : ''}
 
+    <!-- Case selector -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-6 slide-in">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-gray-900 text-sm flex items-center gap-2">
+          <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
+          Add to a Case (optional)
+        </h3>
+        <button onclick="go('cases')" class="text-xs text-indigo-600 font-semibold hover:text-indigo-700">Manage Cases →</button>
+      </div>
+      <div class="flex gap-3">
+        <select id="caseSelector" onchange="state.selectedCaseId=this.value||null"
+          class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all bg-white">
+          <option value="">— No case (process without saving to a case) —</option>
+          ${(state.cases||[]).map(c=>`<option value="${c.id}" ${state.selectedCaseId==c.id?'selected':''}>${c.client_name} (Case #${c.id})</option>`).join('')}
+        </select>
+        <button onclick="showNewCaseModal()"
+          class="px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-1.5 whitespace-nowrap">
+          + New Case
+        </button>
+      </div>
+    </div>
+
+    <!-- New Case Modal (hidden by default) -->
+    <div id="newCaseModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md slide-in">
+        <h2 class="text-xl font-bold text-gray-900 mb-1">Create New Case</h2>
+        <p class="text-sm text-gray-500 mb-5">Give this case a client name to group documents together.</p>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Client Name</label>
+        <input id="newCaseName" type="text" placeholder="e.g. John Smith Mortgage Application"
+          class="w-full border border-gray-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-all mb-4"/>
+        <p id="newCaseError" class="text-red-500 text-xs mb-3 hidden"></p>
+        <div class="flex gap-3">
+          <button onclick="hideNewCaseModal()" class="flex-1 border border-gray-200 rounded-xl py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">Cancel</button>
+          <button onclick="createNewCase()" class="flex-1 bg-indigo-600 text-white rounded-xl py-3 text-sm font-semibold hover:bg-indigo-700 transition-colors">Create Case</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Process button -->
     <div class="flex gap-4">
       <button onclick="${hasFiles ? "processFiles()" : ''}"
@@ -1181,6 +1236,22 @@ async function processFiles() {
     state.anchor  = apiData.anchor || null;
     state.files   = [];
     Object.keys(redactChoices).forEach(k => delete redactChoices[k]);
+
+    // If a case was selected, link each new document to it
+    if (state.selectedCaseId && apiData.results) {
+      for (const doc of apiData.results) {
+        if (doc.id) {
+          await authFetch(`${API_BASE}/api/cases/${state.selectedCaseId}/documents`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ document_id: doc.id }),
+          }).catch(()=>{});
+        }
+      }
+      // Refresh the case list silently
+      loadCasesData().catch(()=>{});
+    }
+
     go('results');
   } catch (err) {
     state.processingError = err.message.includes('fetch')
@@ -1971,6 +2042,403 @@ function togglePref(i) {
 
 
 /* ─────────────────────────────────────────────
+   SCREEN: CASES
+───────────────────────────────────────────── */
+function casesScreen() {
+  const cases = state.cases || [];
+  return `
+<div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+      <button onclick="go('dashboard')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Dashboard
+      </button>
+      <button onclick="showNewCaseModal()"
+        class="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        New Case
+      </button>
+    </div>
+  </header>
+
+  <!-- New Case Modal -->
+  <div id="newCaseModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md slide-in">
+      <h2 class="text-xl font-bold text-gray-900 mb-1">Create New Case</h2>
+      <p class="text-sm text-gray-500 mb-5">Group related mortgage documents under a client name.</p>
+      <label class="block text-sm font-medium text-gray-700 mb-1.5">Client Name</label>
+      <input id="newCaseName" type="text" placeholder="e.g. John Smith Mortgage Application"
+        class="w-full border border-gray-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-transparent transition-all mb-4"/>
+      <p id="newCaseError" class="text-red-500 text-xs mb-3 hidden"></p>
+      <div class="flex gap-3">
+        <button onclick="hideNewCaseModal()" class="flex-1 border border-gray-200 rounded-xl py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">Cancel</button>
+        <button onclick="createNewCase()" class="flex-1 bg-indigo-600 text-white rounded-xl py-3 text-sm font-semibold hover:bg-indigo-700 transition-colors">Create Case</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <div class="mb-8 slide-in">
+      <h1 class="text-3xl font-bold text-gray-900 mb-2">Cases</h1>
+      <p class="text-gray-500">Group mortgage documents by client. Download unified PDF reports for each case.</p>
+    </div>
+
+    ${cases.length === 0 ? `
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 text-center slide-in">
+        <div class="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-5">
+          <svg class="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
+        </div>
+        <h3 class="text-lg font-bold text-gray-900 mb-2">No cases yet</h3>
+        <p class="text-gray-500 text-sm mb-6">Create your first case to start grouping documents by client.</p>
+        <button onclick="showNewCaseModal()"
+          class="px-6 py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors">
+          Create First Case
+        </button>
+      </div>
+    ` : `
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        ${cases.map(c => `
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md hover:border-indigo-100 transition-all cursor-pointer group slide-in"
+            onclick="openCase(${c.id})">
+            <div class="flex items-start justify-between mb-4">
+              <div class="w-11 h-11 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-sm flex-shrink-0">
+                ${c.client_name.charAt(0).toUpperCase()}
+              </div>
+              <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${c.status==='open' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}">
+                ${c.status.toUpperCase()}
+              </span>
+            </div>
+            <h3 class="font-bold text-gray-900 mb-1 group-hover:text-indigo-600 transition-colors">${c.client_name}</h3>
+            <p class="text-xs text-gray-500 mb-4">Case #${c.id} · Created ${timeAgo(c.created_at)}</p>
+            <div class="flex items-center justify-between text-sm">
+              <span class="text-gray-500">${c.doc_count} document${c.doc_count!==1?'s':''}</span>
+              <div class="flex gap-2">
+                <button onclick="event.stopPropagation();downloadCaseReport(${c.id})"
+                  class="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
+                  Download Report
+                </button>
+                <button onclick="event.stopPropagation();deleteCase(${c.id})"
+                  class="text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors">
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `}
+  </main>
+</div>`;
+}
+
+/* ─────────────────────────────────────────────
+   SCREEN: CASE DETAIL
+───────────────────────────────────────────── */
+function caseDetailScreen() {
+  const cd = state.currentCase;
+  if (!cd) return `<div class="flex items-center justify-center h-screen"><p class="text-gray-500">Loading…</p></div>`;
+
+  const { case: c, documents, anchor } = cd;
+  const TIER_NAMES = {1:'Tier 1 – Primary ID',2:'Tier 2 – Secondary ID',3:'Tier 3 – Photo ID',4:'Tier 4 – Supporting',5:'Unknown'};
+  const flagClass  = f => f==='green'?'flag-green':f==='yellow'?'flag-yellow':'flag-red';
+
+  return `
+<div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+      <button onclick="go('cases')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+        Cases
+      </button>
+      <div class="flex gap-3">
+        <button onclick="go('upload')"
+          class="px-4 py-2 text-sm font-semibold text-indigo-600 border border-indigo-200 bg-white rounded-xl hover:bg-indigo-50 transition-colors">
+          + Add Documents
+        </button>
+        <button onclick="downloadCaseReport(${c.id})"
+          id="reportBtn_${c.id}"
+          class="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          Download Report
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Case header card -->
+    <div class="bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-2xl p-7 mb-8 text-white shadow-lg shadow-indigo-200 slide-in">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-indigo-300 text-sm font-medium mb-1">Case #${c.id}</p>
+          <h1 class="text-2xl font-bold mb-2">${c.client_name}</h1>
+          <div class="flex flex-wrap gap-4 text-sm text-indigo-200">
+            <span>${c.doc_count} document${c.doc_count!==1?'s':''}</span>
+            <span>Created ${timeAgo(c.created_at)}</span>
+            <span class="capitalize">${c.status}</span>
+          </div>
+        </div>
+        <span class="bg-white/20 rounded-xl px-4 py-2 text-sm font-semibold uppercase tracking-wide">${c.status}</span>
+      </div>
+      ${anchor ? `
+        <div class="mt-5 pt-5 border-t border-white/20 flex flex-wrap items-center gap-3">
+          <span class="text-indigo-300 text-sm">Identity Anchor:</span>
+          <span class="font-bold text-white">★ ${anchor.anchor_filename}</span>
+          <span class="text-indigo-200 text-sm">${anchor.anchor_doc_type}</span>
+          ${anchor.anchor_name ? `<span class="bg-white/20 px-3 py-1 rounded-full text-xs font-semibold">${anchor.anchor_name}</span>` : ''}
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2 space-y-4">
+        <h2 class="text-lg font-bold text-gray-900">Documents (${documents.length})</h2>
+
+        ${documents.length === 0 ? `
+          <div class="bg-white rounded-2xl border border-gray-100 p-12 text-center">
+            <p class="text-gray-400 text-sm">No documents in this case yet.</p>
+            <button onclick="go('upload')" class="mt-4 px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors">Upload Documents</button>
+          </div>
+        ` : documents.map((doc, di) => {
+          const comp = (anchor?.comparisons||[]).find(x=>x.doc_index===di);
+          const flag = comp?.flag || (anchor && di===anchor.anchor_index ? 'anchor' : '');
+          return `
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 slide-in ${di===anchor?.anchor_index?'anchor-ring':''}">
+            <div class="flex items-start justify-between mb-3">
+              <div class="flex items-start gap-3 flex-1">
+                <div class="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex flex-wrap items-center gap-2 mb-1">
+                    ${di===anchor?.anchor_index ? `<span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">★ Anchor</span>` : ''}
+                    ${flag && flag!=='anchor' ? `<span class="tier-badge ${flagClass(flag)}">${flag.toUpperCase()}</span>` : ''}
+                    <span class="tier-badge tier-${doc.tier}">${TIER_NAMES[doc.tier]||'Unknown'}</span>
+                    ${doc.is_redacted ? `<span class="tier-badge" style="background:#D1FAE5;color:#065F46">Redacted</span>` : ''}
+                  </div>
+                  <p class="font-semibold text-gray-900 text-sm truncate">${doc.filename}</p>
+                  <p class="text-xs text-gray-500">${doc.doc_type} · ${doc.tfn_count} TFN${doc.tfn_count!==1?'s':''} · ${doc.name_count} name${doc.name_count!==1?'s':''}</p>
+                </div>
+              </div>
+            </div>
+
+            ${doc.tfns.length>0 ? `
+              <div class="mt-3 flex flex-wrap gap-2">
+                ${doc.tfns.map(t=>`
+                  <span class="inline-flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">
+                    <span class="tfn-chip text-xs text-red-800">${t.formatted}</span>
+                    <span class="text-xs text-red-500">p.${t.page}</span>
+                  </span>
+                `).join('')}
+              </div>
+            ` : ''}
+
+            ${doc.names.length>0 ? `
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                ${doc.names.map(n=>`<span class="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full font-medium">${n}</span>`).join('')}
+              </div>
+            ` : ''}
+
+            ${comp ? `
+              <div class="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-500">
+                Name match vs anchor: <strong class="text-${flag==='green'?'emerald':flag==='yellow'?'amber':'red'}-600">${comp.best_match_name||'—'} (${comp.best_score}%)</strong>
+                ${comp.reason ? `· ${comp.reason}` : ''}
+              </div>
+            ` : ''}
+          </div>
+        `;}).join('')}
+      </div>
+
+      <!-- Sidebar -->
+      <div class="space-y-5">
+
+        <!-- Anchor Analysis -->
+        ${anchor ? `
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 slide-in">
+          <h3 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+            </svg>
+            Identity Anchor
+          </h3>
+          <div class="p-3 bg-purple-50 rounded-xl mb-3">
+            <p class="text-xs text-purple-600 font-semibold mb-0.5">★ ${anchor.anchor_filename}</p>
+            <p class="text-xs text-purple-500">${anchor.anchor_doc_type}</p>
+            ${anchor.anchor_name ? `<p class="text-xs text-purple-700 font-bold mt-1">${anchor.anchor_name}</p>` : ''}
+          </div>
+          <div class="space-y-2">
+            ${anchor.comparisons.map(c=>`
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-gray-600 truncate max-w-[130px]">${c.filename}</span>
+                <span class="tier-badge ${flagClass(c.flag)} ml-2 flex-shrink-0">${c.flag.toUpperCase()} ${c.best_score}%</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- Quick actions -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 slide-in">
+          <h3 class="font-bold text-gray-900 mb-4">Quick Actions</h3>
+          <div class="space-y-2.5">
+            <button onclick="go('upload')"
+              class="w-full text-left px-4 py-3 border border-indigo-200 bg-indigo-50 rounded-xl text-sm font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors">
+              + Upload More Documents
+            </button>
+            <button onclick="downloadCaseReport(${c.id})"
+              class="w-full text-left px-4 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              Download Unified Report
+            </button>
+            <button onclick="deleteCase(${c.id})"
+              class="w-full text-left px-4 py-3 border border-red-200 rounded-xl text-sm font-semibold text-red-600 hover:bg-red-50 transition-colors">
+              Delete Case
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>`;
+}
+
+/* ─────────────────────────────────────────────
+   CASE FUNCTIONS
+───────────────────────────────────────────── */
+async function loadCasesData() {
+  try {
+    const res = await authFetch(`${API_BASE}/api/cases`);
+    if (!res.ok) return;
+    const data = await res.json();
+    state.cases = data.cases || [];
+    if (state.page === 'cases' || state.page === 'upload') render();
+  } catch (_) {}
+}
+
+async function loadCaseDetail(caseId) {
+  if (!caseId) return;
+  try {
+    const res = await authFetch(`${API_BASE}/api/cases/${caseId}`);
+    if (!res.ok) return;
+    state.currentCase = await res.json();
+    if (state.page === 'caseDetail') render();
+  } catch (_) {}
+}
+
+function showNewCaseModal() {
+  const m = document.getElementById('newCaseModal');
+  if (m) { m.classList.remove('hidden'); document.getElementById('newCaseName')?.focus(); }
+}
+
+function hideNewCaseModal() {
+  const m = document.getElementById('newCaseModal');
+  if (m) m.classList.add('hidden');
+  const e = document.getElementById('newCaseError');
+  if (e) e.classList.add('hidden');
+}
+
+async function createNewCase() {
+  const nameEl = document.getElementById('newCaseName');
+  const errEl  = document.getElementById('newCaseError');
+  const name   = nameEl?.value?.trim();
+
+  if (errEl) errEl.classList.add('hidden');
+  if (!name) {
+    if (errEl) { errEl.textContent = 'Please enter a client name.'; errEl.classList.remove('hidden'); }
+    return;
+  }
+
+  try {
+    const res = await authFetch(`${API_BASE}/api/cases`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_name: name }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || `Error ${res.status}`);
+    const { case: newCase } = await res.json();
+
+    state.cases = [newCase, ...(state.cases || [])];
+    state.selectedCaseId = String(newCase.id);
+    hideNewCaseModal();
+    render();
+  } catch (err) {
+    if (errEl) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+  }
+}
+
+async function openCase(caseId) {
+  state.currentCase = { case: { id: caseId, client_name: '…', doc_count: 0, status:'open', created_at:'' }, documents:[], anchor:null };
+  go('caseDetail');
+  await loadCaseDetail(caseId);
+}
+
+async function downloadCaseReport(caseId) {
+  const btn = document.getElementById(`reportBtn_${caseId}`);
+  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
+
+  try {
+    const res = await authFetch(`${API_BASE}/api/cases/${caseId}/report`);
+    if (!res.ok) throw new Error((await res.json().catch(()=>({}))).detail || `Error ${res.status}`);
+
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `case_${caseId}_report.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Report download failed: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg> Download Report`;
+      btn.disabled = false;
+    }
+  }
+}
+
+async function deleteCase(caseId) {
+  if (!confirm('Delete this case? The documents themselves will not be deleted.')) return;
+  try {
+    const res = await authFetch(`${API_BASE}/api/cases/${caseId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).detail || `Error ${res.status}`);
+    state.cases = (state.cases||[]).filter(c => c.id !== caseId);
+    if (state.page === 'caseDetail') go('cases');
+    else render();
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  }
+}
+
+/* ─────────────────────────────────────────────
    RENDER
 ───────────────────────────────────────────── */
 const screenMap = {
@@ -1981,6 +2449,8 @@ const screenMap = {
   processing: processingScreen,
   results:    resultsScreen,
   profile:    profileScreen,
+  cases:      casesScreen,
+  caseDetail: caseDetailScreen,
 };
 
 function render() {
