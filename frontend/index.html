@@ -866,10 +866,10 @@ function dashboardScreen() { return `
       `).join('')}
     </div>
 
-    <div class="grid lg:grid-cols-3 gap-6">
+    <div class="space-y-6">
 
       <!-- Upload zone -->
-      <div class="lg:col-span-2">
+      <div>
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 slide-in">
           <h2 class="text-xl font-bold text-gray-900 mb-6">Process Documents</h2>
           <div onclick="go('upload')"
@@ -929,53 +929,6 @@ function dashboardScreen() { return `
         </div>
       </div>
 
-      <!-- Side panel -->
-      <div class="space-y-6">
-
-        <!-- Quick info -->
-        <div class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg shadow-indigo-200 slide-in">
-          <h3 class="font-bold mb-1 text-lg">TFN Detection</h3>
-          <p class="text-indigo-200 text-sm mb-4">
-            Finds all Australian Tax File Numbers using the ATO check digit algorithm.
-          </p>
-          <div class="bg-white/10 rounded-xl p-4 space-y-2">
-            <div class="flex justify-between text-sm">
-              <span class="text-indigo-200">Format</span>
-              <span class="font-mono font-bold text-white tracking-widest">XXX XXX XXX</span>
-            </div>
-            <div class="flex justify-between text-sm">
-              <span class="text-indigo-200">Validation</span>
-              <span class="text-white font-semibold">ATO checksum ✓</span>
-            </div>
-            <div class="flex justify-between text-sm">
-              <span class="text-indigo-200">Confidence</span>
-              <span class="text-emerald-300 font-semibold">Shown per result</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- What gets extracted -->
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 slide-in">
-          <h3 class="font-bold text-gray-900 mb-4">What Gets Extracted</h3>
-          <div class="space-y-3">
-            ${[
-              { icon:'🔢', label:'Tax File Numbers', desc:'With page location' },
-              { icon:'👤', label:'Person Names',     desc:'Cross-document matching' },
-              { icon:'📋', label:'Document Type',    desc:'Auto-classified' },
-              { icon:'⬛', label:'Redacted PDF',     desc:'Ready to download' },
-            ].map(i=>`
-              <div class="flex items-center gap-3">
-                <span class="text-xl">${i.icon}</span>
-                <div>
-                  <p class="text-sm font-semibold text-gray-900">${i.label}</p>
-                  <p class="text-xs text-gray-500">${i.desc}</p>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-
-      </div>
     </div>
   </main>
 </div>`; }
