@@ -101,6 +101,7 @@ const state = {
   cases: [],          // list of all cases
   currentCase: null,  // full case detail {case, documents, anchor}
   selectedCaseId: null, // case chosen in upload flow
+  activeCase: null,   // case the user is currently working inside
 };
 
 /* ─────────────────────────────────────────────
@@ -120,7 +121,10 @@ function go(page, data={}) {
   if (page === 'dashboard')  loadDashboardData();
   if (page === 'profile')    loadProfileData();
   if (page === 'cases')      loadCasesData();
-  if (page === 'upload')     loadCasesData();
+  if (page === 'upload') {
+    if (state.activeCase) state.selectedCaseId = String(state.activeCase.id);
+    loadCasesData();
+  }
   if (page === 'caseDetail') loadCaseDetail(state.currentCase?.case?.id);
 }
 
@@ -771,27 +775,29 @@ function dashboardScreen() { return `
   <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-sm shadow-indigo-200">
-          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <button onclick="go('cases')" class="flex items-center gap-2 text-gray-500 hover:text-indigo-600 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+          </svg>
+          <span class="text-sm font-medium hidden sm:block">Cases</span>
+        </button>
+        <div class="w-px h-6 bg-gray-200"></div>
+        <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-sm shadow-indigo-200 flex-shrink-0">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
           </svg>
         </div>
-        <span class="text-xl font-bold text-gray-900">MortgageDoc AI</span>
+        <div>
+          <p class="text-base font-bold text-gray-900 leading-tight">${state.activeCase?.client_name || 'MortgageDoc AI'}</p>
+          ${state.activeCase ? `<p class="text-xs text-gray-400">Case #${state.activeCase.id}</p>` : ''}
+        </div>
       </div>
       ${(()=>{
         const email    = state.user?.email || '';
         const name     = state.user?.user_metadata?.full_name || email.split('@')[0] || 'User';
         const initials = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase() || 'U';
         return `<div class="flex items-center gap-3">
-          <button onclick="go('cases')"
-            class="hidden sm:flex items-center gap-2 px-4 py-2 text-sm font-semibold text-indigo-600 border border-indigo-200 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-            </svg>
-            Cases
-          </button>
           <div class="text-right hidden sm:block">
             <p class="text-sm font-semibold text-gray-900">${name}</p>
             <p class="text-xs text-gray-500">${email}</p>
@@ -807,10 +813,10 @@ function dashboardScreen() { return `
     <!-- Stats -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
       ${[
-        { label:'Docs Processed',  value: state.stats.processed || 12,  icon:'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',  bg:'bg-blue-100',   ic:'text-blue-600'   },
-        { label:'TFNs Detected',   value: state.stats.tfnsFound  || 4,   icon:'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',              bg:'bg-red-100',    ic:'text-red-600'    },
-        { label:'Names Extracted', value: state.stats.namesFound || 28,  icon:'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', bg:'bg-purple-100', ic:'text-purple-600' },
-        { label:'Needs Review',    value: state.stats.flagged    || 2,   icon:'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', bg:'bg-amber-100',  ic:'text-amber-600'  },
+        { label:'Docs Processed',  value: state.stats.processed || 0,  icon:'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',  bg:'bg-blue-100',   ic:'text-blue-600'   },
+        { label:'TFNs Detected',   value: state.stats.tfnsFound  || 0,  icon:'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',              bg:'bg-red-100',    ic:'text-red-600'    },
+        { label:'Names Extracted', value: state.stats.namesFound || 0,  icon:'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', bg:'bg-purple-100', ic:'text-purple-600' },
+        { label:'Needs Review',    value: state.stats.flagged    || 0,  icon:'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', bg:'bg-amber-100',  ic:'text-amber-600'  },
       ].map(s=>`
         <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
           <div class="flex items-center justify-between">
@@ -1050,30 +1056,21 @@ function uploadScreen() {
       </div>
     ` : ''}
 
-    <!-- Case selector -->
-    <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-6 slide-in">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="font-semibold text-gray-900 text-sm flex items-center gap-2">
-          <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
-          </svg>
-          Add to a Case (optional)
-        </h3>
-        <button onclick="go('cases')" class="text-xs text-indigo-600 font-semibold hover:text-indigo-700">Manage Cases →</button>
+    <!-- Active case banner -->
+    ${state.activeCase ? `
+    <div class="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-6 slide-in flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+          ${state.activeCase.client_name.charAt(0).toUpperCase()}
+        </div>
+        <div>
+          <p class="text-sm font-bold text-indigo-900">${state.activeCase.client_name}</p>
+          <p class="text-xs text-indigo-500">Case #${state.activeCase.id} · Documents will be added to this case</p>
+        </div>
       </div>
-      <div class="flex gap-3">
-        <select id="caseSelector" onchange="state.selectedCaseId=this.value||null"
-          class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition-all bg-white">
-          <option value="">— No case (process without saving to a case) —</option>
-          ${(state.cases||[]).map(c=>`<option value="${c.id}" ${state.selectedCaseId==c.id?'selected':''}>${c.client_name} (Case #${c.id})</option>`).join('')}
-        </select>
-        <button onclick="showNewCaseModal()"
-          class="px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-1.5 whitespace-nowrap">
-          + New Case
-        </button>
-      </div>
+      <button onclick="go('cases')" class="text-xs text-indigo-600 font-semibold hover:text-indigo-800 transition-colors">Change Case →</button>
     </div>
+    ` : ''}
 
     <!-- New Case Modal (hidden by default) -->
     <div id="newCaseModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -2125,8 +2122,9 @@ function casesScreen() {
               <span class="text-gray-500">${c.doc_count} document${c.doc_count!==1?'s':''}</span>
               <div class="flex gap-2">
                 <button onclick="event.stopPropagation();downloadCaseReport(${c.id})"
+                  id="reportBtn_${c.id}"
                   class="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors">
-                  Download Report
+                  Report
                 </button>
                 <button onclick="event.stopPropagation();deleteCase(${c.id})"
                   class="text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors">
@@ -2384,18 +2382,21 @@ async function createNewCase() {
     const { case: newCase } = await res.json();
 
     state.cases = [newCase, ...(state.cases || [])];
-    state.selectedCaseId = String(newCase.id);
     hideNewCaseModal();
-    render();
+    // Open the new case immediately into the dashboard
+    state.activeCase     = newCase;
+    state.selectedCaseId = String(newCase.id);
+    go('dashboard');
   } catch (err) {
     if (errEl) { errEl.textContent = err.message; errEl.classList.remove('hidden'); }
   }
 }
 
 async function openCase(caseId) {
-  state.currentCase = { case: { id: caseId, client_name: '…', doc_count: 0, status:'open', created_at:'' }, documents:[], anchor:null };
-  go('caseDetail');
-  await loadCaseDetail(caseId);
+  const found = (state.cases || []).find(c => c.id === caseId);
+  state.activeCase     = found || { id: caseId, client_name: '…' };
+  state.selectedCaseId = String(caseId);
+  go('dashboard');
 }
 
 async function downloadCaseReport(caseId) {
@@ -2506,7 +2507,9 @@ async function submitEmailAuth() {
       options: { data: { full_name: name || email.split('@')[0] } }
     });
     if (error) {
-      errorEl.textContent = error.message;
+      errorEl.textContent = error.message === 'Failed to fetch'
+        ? 'Authentication service unreachable. Your Supabase project may be paused — resume it at supabase.com/dashboard.'
+        : error.message;
       errorEl.classList.remove('hidden');
     } else {
       successEl.textContent = 'Account created! You can now sign in.';
@@ -2516,7 +2519,9 @@ async function submitEmailAuth() {
   } else {
     const { error } = await sb.auth.signInWithPassword({ email, password });
     if (error) {
-      errorEl.textContent = error.message;
+      errorEl.textContent = error.message === 'Failed to fetch'
+        ? 'Authentication service unreachable. Your Supabase project may be paused — resume it at supabase.com/dashboard.'
+        : error.message;
       errorEl.classList.remove('hidden');
     }
   }
@@ -2557,8 +2562,8 @@ async function signOut() {
 sb.auth.onAuthStateChange((event, session) => {
   state.session = session;
   state.user    = session?.user ?? null;
-  if (event === 'SIGNED_IN')  go('dashboard');
-  if (event === 'SIGNED_OUT') { state.page = 'home'; render(); }
+  if (event === 'SIGNED_IN')  go('cases');
+  if (event === 'SIGNED_OUT') { state.activeCase = null; state.page = 'home'; render(); }
 });
 
 // ── On load: restore existing session then render ─────────────────────────────
@@ -2566,8 +2571,9 @@ sb.auth.onAuthStateChange((event, session) => {
   const { data: { session } } = await sb.auth.getSession();
   state.session = session;
   state.user    = session?.user ?? null;
-  if (session && state.page === 'home') state.page = 'dashboard';
+  if (session && state.page === 'home') state.page = 'cases';
   render();
+  if (state.page === 'cases')     loadCasesData();
   if (state.page === 'dashboard') loadDashboardData();
 })();
 </script>
