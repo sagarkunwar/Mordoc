@@ -838,15 +838,7 @@ function appNav({ actions = '' } = {}) {
 ───────────────────────────────────────────── */
 function dashboardScreen() { return `
 <div class="min-h-screen">
-  ${appNav({ actions: `
-    <button onclick="go('upload')"
-      class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-      </svg>
-      <span class="hidden sm:inline">Upload</span>
-    </button>
-  `})}
+  ${appNav()}
 
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -996,7 +988,7 @@ function uploadScreen() {
   return `
 <div class="min-h-screen">
 
-  ${appNav({ actions: state.files.length > 0 ? `<span class="text-sm font-semibold text-indigo-600">${state.files.length} file${state.files.length>1?'s':''} ready</span>` : '' })}
+  ${appNav()}
 
   <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
