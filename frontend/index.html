@@ -872,8 +872,14 @@ function dashboardScreen() { return `
       <div>
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 slide-in">
           <h2 class="text-xl font-bold text-gray-900 mb-6">Process Documents</h2>
-          <div onclick="go('upload')"
-            class="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:border-indigo-400 hover:bg-indigo-50/40 transition-all cursor-pointer group">
+          <div id="dashDropZone"
+            class="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:border-indigo-400 hover:bg-indigo-50/40 transition-all cursor-pointer group"
+            onclick="document.getElementById('dashFileInput').click()"
+            ondragover="handleDragOver(event)"
+            ondragleave="handleDragLeave(event)"
+            ondrop="handleDashDrop(event)">
+            <input type="file" id="dashFileInput" class="hidden" multiple accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.bmp,.webp"
+              onchange="handleDashFileSelect(event)"/>
             <div class="w-16 h-16 bg-indigo-100 rounded-2xl mx-auto mb-4 flex items-center justify-center group-hover:bg-indigo-200 transition-colors">
               <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1704,6 +1710,17 @@ function handleDrop(e) {
   const ALLOWED = ['application/pdf','image/jpeg','image/png','image/tiff','image/bmp','image/webp','image/gif'];
   const files = [...e.dataTransfer.files].filter(f=>ALLOWED.includes(f.type)||f.name.match(/\.(pdf|jpe?g|png|tiff?|bmp|webp)$/i));
   if (files.length) addFiles(files);
+}
+function handleDashFileSelect(e) {
+  addFiles([...e.target.files]);
+  go('upload');
+}
+function handleDashDrop(e) {
+  e.preventDefault();
+  document.getElementById('dashDropZone')?.classList.remove('drag-over');
+  const ALLOWED = ['application/pdf','image/jpeg','image/png','image/tiff','image/bmp','image/webp'];
+  const files = [...e.dataTransfer.files].filter(f=>ALLOWED.includes(f.type)||f.name.match(/\.(pdf|jpe?g|png|tiff?|bmp|webp)$/i));
+  if (files.length) { addFiles(files); go('upload'); }
 }
 function addFiles(newFiles) {
   const existing = new Set(state.files.map(f=>f.name));

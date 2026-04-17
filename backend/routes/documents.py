@@ -9,6 +9,7 @@ from typing import List
 import io
 
 from processors.document_ai import process_document_with_ocr
+from processors.data_extractor import extract_structured_data
 from database import get_db, log_audit
 from auth import get_current_user
 
@@ -33,12 +34,17 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
         result = process_document_with_ocr(content, upload.filename, len(content))
         raw_results.append(result)
 
+        # Extract structured fields via OpenRouter LLM
+        full_text = "\n".join(p.text for p in result.pages)
+        extracted = extract_structured_data(full_text, result.doc_type, result.filename)
+        extracted_json = json.dumps(extracted) if extracted else None
+
         # Persist to DB
         cursor = db.execute(
             """INSERT INTO documents
                (filename, pages, status, file_size, tfn_count, name_count,
-                error_msg, file_bytes, doc_type, tier)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                error_msg, file_bytes, doc_type, tier, extracted_data)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 result.filename,
                 result.total_pages,
@@ -50,6 +56,7 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
                 content,
                 result.doc_type,
                 result.tier,
+                extracted_json,
             ),
         )
         doc_id = cursor.lastrowid
@@ -100,6 +107,7 @@ async def process_documents(files: List[UploadFile] = File(...), user: dict = De
                 for t in result.all_tfns
             ],
             "names": result.names,
+            "extracted_data": extracted,
         })
 
     db.commit()

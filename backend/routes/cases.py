@@ -2,7 +2,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-import json
+import json as _json_mod
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 import io
@@ -70,6 +70,7 @@ def _enrich_documents(db, case_id: int) -> tuple[list, list]:
             "created_at":       doc["created_at"],
             "is_redacted":      bool(cd["is_redacted"]),
             "flag":             "",   # filled in below
+            "extracted_data":   _json_mod.loads(doc["extracted_data"]) if doc["extracted_data"] else {},
             "tfns": [
                 {"formatted": t["formatted"], "page": t["page_number"],
                  "confidence": int((t["confidence"] or 0) * 100),
@@ -180,12 +181,15 @@ def get_case(case_id: int, user: dict = Depends(get_current_user)):
     enriched, _ = _enrich_documents(db, case_id)
     db.close()
 
-    anchor = _run_anchor_analysis(enriched) if enriched else None
+    from processors.case_analyser import analyse_case
+    anchor   = _run_anchor_analysis(enriched) if enriched else None
+    analysis = analyse_case(enriched) if enriched else None
 
     return {
         "case":      _case_row_to_dict(case),
         "documents": enriched,
         "anchor":    anchor,
+        "analysis":  analysis,
     }
 
 
@@ -352,13 +356,14 @@ def download_report(case_id: int, user: dict = Depends(get_current_user)):
 
     db.close()
 
-    anchor = _run_anchor_analysis(enriched) if enriched else None
+    from processors.case_analyser import analyse_case
+    analysis = analyse_case(enriched) if enriched else {}
 
     pdf_bytes = generate_case_report(
         case       = dict(case),
         documents  = enriched,
         file_blobs = blobs,
-        anchor     = anchor,
+        analysis   = analysis,
         audit_rows = [dict(r) for r in audit_rows],
     )
 
@@ -372,6 +377,40 @@ def download_report(case_id: int, user: dict = Depends(get_current_user)):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
     )
+
+
+@router.get("/{case_id}/extracted")
+def get_extracted_data(case_id: int, user: dict = Depends(get_current_user)):
+    """
+    Return a structured JSON map of all extracted fields for every document in the case.
+    Shape: { case_id, case_slug, extracted_data: { doc_key: { ...fields } } }
+    """
+    db = get_db()
+    case = db.execute("SELECT * FROM cases WHERE id=?", (case_id,)).fetchone()
+    if not case:
+        db.close()
+        raise HTTPException(status_code=404, detail="Case not found.")
+
+    enriched, _ = _enrich_documents(db, case_id)
+    db.close()
+
+    extracted_map = {}
+    type_counts: dict[str, int] = {}
+    for doc in enriched:
+        raw_type = doc.get("doc_type", "unknown_document")
+        # Build a safe snake_case key from the doc type, deduplicated
+        key_base = raw_type.lower().replace(" ", "_").replace("-", "_").replace("/", "_")
+        key_base = "".join(c for c in key_base if c.isalnum() or c == "_")
+        count = type_counts.get(key_base, 0) + 1
+        type_counts[key_base] = count
+        key = key_base if count == 1 else f"{key_base}_{count}"
+        extracted_map[key] = doc.get("extracted_data") or {}
+
+    slug = f"{case_id}_{case['client_name'].replace(' ', '_').upper()}"
+    return {
+        "case_id":       slug,
+        "extracted_data": extracted_map,
+    }
 
 
 @router.delete("/{case_id}")

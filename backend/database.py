@@ -86,6 +86,7 @@ def init_db():
         ("documents", "tier",           "INTEGER DEFAULT 5"),
         ("cases",     "anchor_name",    "TEXT"),
         ("cases",     "anchor_doc_type","TEXT"),
+        ("documents", "extracted_data", "TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
