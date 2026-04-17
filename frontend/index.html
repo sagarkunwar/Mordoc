@@ -766,47 +766,87 @@ function loginScreen() {
 </div>`; }
 
 /* ─────────────────────────────────────────────
-   SCREEN: DASHBOARD
+   SHARED: APP NAVBAR
 ───────────────────────────────────────────── */
-function dashboardScreen() { return `
-<div class="min-h-screen">
+function appNav({ actions = '' } = {}) {
+  const email    = state.user?.email || '';
+  const name     = state.user?.user_metadata?.full_name || email.split('@')[0] || 'User';
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'U';
+  const pg       = state.page;
 
-  <!-- Header -->
-  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <button onclick="go('cases')" class="flex items-center gap-2 text-gray-500 hover:text-indigo-600 transition-colors">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-          </svg>
-          <span class="text-sm font-medium hidden sm:block">Cases</span>
-        </button>
-        <div class="w-px h-6 bg-gray-200"></div>
-        <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shadow-sm shadow-indigo-200 flex-shrink-0">
-          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  const navLink = (id, label, icon) => {
+    const active = pg === id;
+    return `
+      <button onclick="go('${id}')"
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all
+               ${active ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:text-indigo-600 hover:bg-gray-100'}">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${icon}"/>
+        </svg>
+        <span class="hidden sm:inline">${label}</span>
+      </button>`;
+  };
+
+  return `
+<header class="bg-white border-b border-gray-200 sticky top-0 z-30">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
+
+    <!-- Left: Logo + nav links -->
+    <div class="flex items-center gap-1">
+      <button onclick="go(state.activeCase ? 'dashboard' : 'cases')" class="flex items-center gap-2 mr-2">
+        <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-sm shadow-indigo-200 flex-shrink-0">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
           </svg>
         </div>
-        <div>
-          <p class="text-base font-bold text-gray-900 leading-tight">${state.activeCase?.client_name || 'MortgageDoc AI'}</p>
-          ${state.activeCase ? `<p class="text-xs text-gray-400">Case #${state.activeCase.id}</p>` : ''}
-        </div>
-      </div>
-      ${(()=>{
-        const email    = state.user?.email || '';
-        const name     = state.user?.user_metadata?.full_name || email.split('@')[0] || 'User';
-        const initials = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase() || 'U';
-        return `<div class="flex items-center gap-3">
-          <div class="text-right hidden sm:block">
-            <p class="text-sm font-semibold text-gray-900">${name}</p>
-            <p class="text-xs text-gray-500">${email}</p>
-          </div>
-          <button onclick="go('profile')" class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center font-bold text-indigo-600 hover:bg-indigo-200 hover:ring-2 hover:ring-indigo-300 transition-all">${initials}</button>
-        </div>`;
-      })()}
+        <span class="text-base font-bold text-gray-900 hidden md:block">MortgageDoc <span class="text-indigo-600">AI</span></span>
+      </button>
+
+      ${navLink('cases',     'Cases',     'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z')}
+      ${state.activeCase ? `
+      <svg class="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+      ${navLink('dashboard', state.activeCase.client_name, 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z')}
+      ` : ''}
+      ${state.activeCase && (pg === 'upload' || pg === 'results') ? `
+      <svg class="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+      <span class="text-sm font-medium text-gray-400 px-2">${pg === 'upload' ? 'Upload' : 'Results'}</span>
+      ` : ''}
     </div>
-  </header>
+
+    <!-- Right: page actions + user -->
+    <div class="flex items-center gap-2">
+      ${actions}
+      <div class="w-px h-5 bg-gray-200 mx-1"></div>
+      <span class="text-sm text-gray-600 hidden sm:block truncate max-w-[120px]">${name}</span>
+      <button onclick="go('profile')"
+        class="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center font-bold text-indigo-600 text-xs
+               hover:bg-indigo-200 hover:ring-2 hover:ring-indigo-300 transition-all flex-shrink-0">
+        ${initials}
+      </button>
+    </div>
+  </div>
+</header>`;
+}
+
+/* ─────────────────────────────────────────────
+   SCREEN: DASHBOARD
+───────────────────────────────────────────── */
+function dashboardScreen() { return `
+<div class="min-h-screen">
+  ${appNav({ actions: `
+    <button onclick="go('upload')"
+      class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+      </svg>
+      <span class="hidden sm:inline">Upload</span>
+    </button>
+  `})}
 
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -956,20 +996,7 @@ function uploadScreen() {
   return `
 <div class="min-h-screen">
 
-  <!-- Header -->
-  <header class="bg-white border-b border-gray-200">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-      <button onclick="go('dashboard')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors font-medium">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-        </svg>
-        Dashboard
-      </button>
-      <span class="text-sm font-semibold text-indigo-600">
-        ${state.files.length > 0 ? state.files.length+' file'+(state.files.length>1?'s':'')+' ready' : 'Upload Documents'}
-      </span>
-    </div>
-  </header>
+  ${appNav({ actions: state.files.length > 0 ? `<span class="text-sm font-semibold text-indigo-600">${state.files.length} file${state.files.length>1?'s':''} ready</span>` : '' })}
 
   <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -1452,25 +1479,12 @@ function resultsScreen() {
   return `
 <div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
 
-  <!-- Header -->
-  <header class="bg-white border-b border-gray-200">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-      <button onclick="go('dashboard')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-        </svg>
-        Dashboard
-      </button>
-      <div class="flex gap-3">
-        <button class="px-4 py-2 text-sm font-semibold text-indigo-600 border border-indigo-200 bg-white rounded-xl hover:bg-indigo-50 transition-colors">
-          Export CSV
-        </button>
-        <button class="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all">
-          Download All Redacted
-        </button>
-      </div>
-    </div>
-  </header>
+  ${appNav({ actions: `
+    <button onclick="confirmRedaction()"
+      class="px-3 py-1.5 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors">
+      Confirm Redaction
+    </button>
+  `})}
 
   <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -1766,25 +1780,12 @@ function profileScreen() {
   return `
 <div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
 
-  <!-- Header -->
-  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-      <button onclick="go('dashboard')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors font-medium">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-        </svg>
-        Dashboard
-      </button>
-      <button onclick="signOut()"
-        class="flex items-center gap-2 text-red-500 hover:text-red-700 font-medium text-sm transition-colors">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
-        </svg>
-        Sign Out
-      </button>
-    </div>
-  </header>
+  ${appNav({ actions: `
+    <button onclick="signOut()"
+      class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-red-500 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+      Sign Out
+    </button>
+  `})}
 
   <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -2046,24 +2047,15 @@ function casesScreen() {
   return `
 <div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
 
-  <!-- Header -->
-  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-      <button onclick="go('dashboard')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-        </svg>
-        Dashboard
-      </button>
-      <button onclick="showNewCaseModal()"
-        class="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-        </svg>
-        New Case
-      </button>
-    </div>
-  </header>
+  ${appNav({ actions: `
+    <button onclick="showNewCaseModal()"
+      class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+      </svg>
+      New Case
+    </button>
+  `})}
 
   <!-- New Case Modal -->
   <div id="newCaseModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -2154,32 +2146,16 @@ function caseDetailScreen() {
   return `
 <div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
 
-  <!-- Header -->
-  <header class="bg-white border-b border-gray-200 sticky top-0 z-20">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-      <button onclick="go('cases')" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium transition-colors">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-        </svg>
-        Cases
-      </button>
-      <div class="flex gap-3">
-        <button onclick="go('upload')"
-          class="px-4 py-2 text-sm font-semibold text-indigo-600 border border-indigo-200 bg-white rounded-xl hover:bg-indigo-50 transition-colors">
-          + Add Documents
-        </button>
-        <button onclick="downloadCaseReport(${c.id})"
-          id="reportBtn_${c.id}"
-          class="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-200 transition-all flex items-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-          </svg>
-          Download Report
-        </button>
-      </div>
-    </div>
-  </header>
+  ${appNav({ actions: `
+    <button onclick="go('upload')"
+      class="px-3 py-1.5 text-sm font-semibold text-indigo-600 border border-indigo-200 bg-white rounded-lg hover:bg-indigo-50 transition-colors">
+      + Add Docs
+    </button>
+    <button onclick="downloadCaseReport(${c.id})" id="reportBtn_${c.id}"
+      class="px-3 py-1.5 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors">
+      Download Report
+    </button>
+  `})}
 
   <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
